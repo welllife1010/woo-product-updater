@@ -1,0 +1,35 @@
+{
+  "name": "woo-rest-api-ts",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.679.0",
+    "@bull-board/api": "^6.7.7",
+    "@bull-board/express": "^6.7.7",
+    "aws-sdk": "^2.1691.0",
+    "bottleneck": "^2.19.5",
+    "bull": "^4.16.4",
+    "bullmq": "^5.41.2",
+    "csv-parse": "^5.5.6",
+    "csv-parser": "^3.0.0",
+    "dayjs": "^1.11.13",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "json2csv": "^6.0.0-alpha.2",
+    "perf_hooks": "^0.0.1",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "redis": "^4.7.0",
+    "stream": "^0.0.3",
+    "string-strip-html": "^13.4.8",
+    "util": "^0.12.5",
+    "woocommerce-rest-ts-api": "^7.0.0"
+  }
+}
