@@ -146,46 +146,23 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
 };
 
 // ***************************************************************************
-// Helper - Record missing product data
-// ***************************************************************************
-const recordMissingProduct = (fileKey, item) => {
-  const missingFilePath = path.join(__dirname, `missing_products_${fileKey}.json`);
-  let missingProducts = [];
-  
-  // If the file exists, read its current content
-  if (fs.existsSync(missingFilePath)) {
-    try {
-      missingProducts = JSON.parse(fs.readFileSync(missingFilePath, 'utf8'));
-    } catch (err) {
-      logErrorToFile(`Error reading missing products file: ${err.message}`);
-    }
-  }
-  
-  // Add the current item (from the CSV) to the array
-  missingProducts.push(item);
-  
-  // Write the updated array back to the file
-  fs.writeFileSync(missingFilePath, JSON.stringify(missingProducts, null, 2));
-  logInfoToFile(`Recorded missing product for part_number=${item.part_number}`);
-};
-
-// ***************************************************************************
 // Helper - Create new data for WooCommerce update
-// item: a single CSV row (passed as the item object)
+// item: A single CSV row (passed as the item object)
 // Build an object that matches the format required by the WooCommerce Bulk API for updating products.
 // ***************************************************************************
 const createNewData =  (item, productId, part_number) => {
   let additionalKeyInfo = [];
+  const normalizedItem = {};
 
   // Normalize CSV headers by converting them to lowercase and removing special characters
-  const normalizedItem = {};
   Object.keys(item).forEach(key => {
     const normalizedKey = key.trim().toLowerCase().replace(/\s+/g, "_"); // Normalize key names
     normalizedItem[normalizedKey] = item[key];
   });
 
   // Define valid meta_data mappings using normalized CSV keys
-  const metaDataMappings = {
+  // csvKey: normalized CSV key, metaDataKeyMappings: WooCommerce meta_data key
+  const metaDataKeyMappings = {
       "manufacturer": "manufacturer",
       "leadtime": "manufacturer_lead_weeks",
       "image_url": "image_url",
@@ -208,10 +185,10 @@ const createNewData =  (item, productId, part_number) => {
   };
 
   // Build the meta_data array from the CSV headers (excluding datasheet for now)
-  let metaDataArray = Object.keys(metaDataMappings)
+  let metaDataArray = Object.keys(metaDataKeyMappings)
     .filter(csvKey => normalizedItem.hasOwnProperty(csvKey)) // Only include fields that exist in the CSV
     .map(csvKey => ({
-      key: metaDataMappings[csvKey],
+      key: metaDataKeyMappings[csvKey],
       value: normalizedItem[csvKey] || "" // Ensure missing values default to an empty string
     }));
 
@@ -237,7 +214,7 @@ const createNewData =  (item, productId, part_number) => {
 
   // Store unknown fields in additional_key_information
   Object.keys(normalizedItem).forEach(key => {
-    if (!metaDataMappings[key] && key !== "datasheet" && key !== "part_number" &&
+    if (!metaDataKeyMappings[key] && key !== "datasheet" && key !== "part_number" &&
         formatAcfFieldName(key) != "Category" && formatAcfFieldName(key) != "Product Status") {
       let value = normalizedItem[key] || "";
       if (value !== "" && value !== "NaN") {
@@ -273,6 +250,30 @@ const filterCurrentData = (product) => {
         ["spq", "manufacturer", "image_url", "datasheet_url", "series_url", "series", "quantity", "operating_temperature", "voltage", "package", "supplier_device_package", "mounting_type", "short_description", "detail_description", "additional_key_information", "reach_status", "rohs_status", "moisture_sensitivity_level", "export_control_class_number", "htsus_code"].includes(meta.key)
     ),
   };
+};
+
+// ***************************************************************************
+// Helper - Record missing product data
+// ***************************************************************************
+const recordMissingProduct = (fileKey, item) => {
+  const missingFilePath = path.join(__dirname, `missing_products_${fileKey}.json`);
+  let missingProducts = [];
+  
+  // If the file exists, read its current content
+  if (fs.existsSync(missingFilePath)) {
+    try {
+      missingProducts = JSON.parse(fs.readFileSync(missingFilePath, 'utf8'));
+    } catch (err) {
+      logErrorToFile(`Error reading missing products file: ${err.message}`);
+    }
+  }
+  
+  // Add the current item (from the CSV) to the array
+  missingProducts.push(item);
+  
+  // Write the updated array back to the file
+  fs.writeFileSync(missingFilePath, JSON.stringify(missingProducts, null, 2));
+  logInfoToFile(`Recorded missing product for part_number=${item.part_number}`);
 };
 
 // ***************************************************************************
