@@ -1,4 +1,4 @@
-const createUniqueJobId = (fileKey, action = "", rowIndex = "", retryCount = "") => {
+const createUniqueJobId = (fileKey, action = "", rowIndex = 0, retryCount = "") => {
     // ✅ Ensure rowIndex and retryCount are valid integers or default to 0
     const validRowIndex = Number.isInteger(Number(rowIndex)) ? Number(rowIndex) : 0;
     const validRetryCount = Number.isInteger(Number(retryCount)) ? Number(retryCount) : 0;

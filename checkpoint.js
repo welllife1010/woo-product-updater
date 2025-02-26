@@ -98,11 +98,11 @@ async function saveCheckpoint(fileKey, lastProcessedRow, totalRows) {
 }
 
 /**
- * getCheckpoint returns the lastProcessedRow stored in process_checkpoint.json.
+ * getLastProcessedRow returns the lastProcessedRow stored in process_checkpoint.json.
  */
-function getCheckpoint(fileKey) {
+function getLastProcessedRow(fileKey) {
     if (!fileKey || typeof fileKey !== "string") {
-      logErrorToFile(`❌ getCheckpoint missing valid fileKey`);
+      logErrorToFile(`❌ getLastProcessedRow missing valid fileKey`);
       return 0;
     }
   
@@ -129,12 +129,12 @@ function getCheckpoint(fileKey) {
         return 0;
       }
     } catch (error) {
-      logErrorToFile(`❌ Error reading getCheckpoint: ${error.message}`);
+      logErrorToFile(`❌ Error reading getLastProcessedRow: ${error.message}`);
       return 0;
     }
 }
 
 module.exports = {
     saveCheckpoint,
-    getCheckpoint,
+    getLastProcessedRow,
 };

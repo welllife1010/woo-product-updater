@@ -130,34 +130,38 @@ const getTotalRowsFromS3 = async (bucketName, key) => {
       const rows = bodyContent.split('\n');
       return rows.length - 1; // Exclude header row
   } catch (error) {
-      logErrorToFile(`❌ Failed to fetch totalRows for ${key} from S3: ${error.message}`);
-      return 0;
+    logErrorToFile(`❌ Failed to fetch totalRows for ${key} from S3: ${error.message}`);
+    return null;
   }
 };
 
 // Read CSV from S3 and enqueue jobs
 const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
   let totalRows = await getTotalRowsFromS3(bucketName, key);
-  if (totalRows <= 0) {
-      logErrorToFile(`❌ Invalid totalRows (${totalRows}) for ${key}. Skipping processing.`);
-      return;
+  // if (totalRows <= 0) {
+  //     logErrorToFile(`❌ Invalid totalRows (${totalRows}) for ${key}. Skipping processing.`);
+  //     return;
+  // }
+  if (totalRows === null) {
+    logErrorToFile(`❌ Skipping ${key} due to S3 read error.`);
+    return;
   }
 
    // ✅ Initialize tracking for this file in Redis
    await initializeFileTracking(key, totalRows);
 
-   logInfoToFile(`🚀 Processing file: ${key} | Total Rows: ${totalRows}`);
+   logInfoToFile(`🚀 Processing file: ${key} | Total Rows: ${totalRows} | Checkpoints set up in Redis`);
   
   // ✅ **Check for Duplicate Jobs Across All States**
   const allExistingJobs = await batchQueue.getJobs(["waiting", "active", "delayed", "completed", "failed"]);
 
   // ✅ **Find the Last Processed Row by Checking Existing Jobs**
-  const existingJobNumbers = allExistingJobs.map(job => {
+  const completedJobs = await batchQueue.getJobs(["completed"]);
+  const existingJobNumbers = completedJobs.map(job => {
       const match = job.id.match(/row-(\d+)/);
       return match ? Number(match[1]) : 0;
   });
-
-  let lastProcessedRow = Math.max(0, ...existingJobNumbers);
+  let lastProcessedRow = existingJobNumbers.length > 0 ? Math.max(...existingJobNumbers) : 0;
 
   // ✅ **Reset lastProcessedRow if no jobs exist**
   if (existingJobNumbers.length === 0) {
@@ -166,19 +170,21 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
   }
 
   // ✅ **Check if All Rows Have Been Processed**
-  // if (lastProcessedRow >= totalRows) {
-  //     logInfoToFile(`✅ All rows processed for ${key}. No new jobs enqueued.`);
-  //     return;
-  // }
+  const totalCompleted = await redisClient.get(`updated-products:${key}`) || 0;
+  const totalSkipped = await redisClient.get(`skipped-products:${key}`) || 0;
+  const totalFailed = await redisClient.get(`failed-products:${key}`) || 0;
+  const totalProcessed = parseInt(totalCompleted) + parseInt(totalSkipped) + parseInt(totalFailed);
 
-  if (lastProcessedRow >= totalRows) {
-    logInfoToFile(`⚠️ Resetting lastProcessedRow to 0 to force job enqueueing.`);
-    lastProcessedRow = 0;  // Reset processing if no jobs exist
+  if (totalProcessed >= totalRows) {
+      logInfoToFile(`✅ All rows in ${key} have been processed. Resetting lastProcessedRow.`);
+      lastProcessedRow = 0;
   }
 
   logInfoToFile(`🚀 Processing ${key} | LastProcessedRow: ${lastProcessedRow} | Total Rows: ${totalRows}`);
 
-  const nextBatchStart = lastProcessedRow + batchSize;
+  const remainder = lastProcessedRow % batchSize;
+  const nextBatchStart = remainder === 0 ? lastProcessedRow : lastProcessedRow + (batchSize - remainder);
+
   if (nextBatchStart > totalRows) {
     if (lastProcessedRow < totalRows) {
       logInfoToFile(`⚠️ Small file detected (${totalRows} rows), adjusting batch processing.`);
@@ -188,11 +194,17 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
     }
   }
 
+  if (totalRows <= batchSize) {
+    logInfoToFile(`⚠️ Small file detected (${totalRows} rows), forcing job enqueueing.`);
+    lastProcessedRow = 0;
+  }
+
   // ✅ **Generate Unique Job ID**
   const jobId = `jobId_${key}_row-${nextBatchStart}`;
 
   // ✅ **Check if Job is Already Queued**
-  const isDuplicate = allExistingJobs.some(job => job.id === jobId);
+  const activeJobs = await batchQueue.getJobs(["waiting", "active", "completed"]);
+  const isDuplicate = activeJobs.some(job => job.id === jobId);
   if (isDuplicate) {
       logInfoToFile(`⚠️ Duplicate job detected: ${jobId}, skipping.`);
       return;
@@ -244,7 +256,7 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
               };
 
               // Generate a unique jobId with row index
-              const jobId = createUniqueJobId(key, "s3-helper_readCSVAndEnqueueJobs", String(lastProcessedRow));
+              const jobId = createUniqueJobId(key, "s3-helper_readCSVAndEnqueueJobs", lastProcessedRow);
 
               // ✅ **Check for duplicate job**
               if (allExistingJobs.some(job => job.id === jobId)) {
@@ -296,6 +308,12 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
           const jobId = createUniqueJobId(key, "s3-helper_readCSVAndEnqueueJobs", String(lastProcessedRow));
 
           try {
+            const existingFinalJob = activeJobs.some(job => job.id === jobId);
+            if (existingFinalJob) {
+                logInfoToFile(`⚠️ Final batch job already exists: ${jobId}, skipping.`);
+                return;
+            }
+
             // Use the centralized function to add the batch job
             const job = await addBatchJob(jobData, jobId);
             
@@ -303,7 +321,7 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
         
             logInfoToFile(`✅ Job enqueued: ${job.id} | Rows: ${batch.length} | File: ${key}`);
         
-            logInfoToFile(`Enqueued final batch job for rows up to ${lastProcessedRow} in file: ${key}`);
+            logInfoToFile(`Enqueued FINAL batch job for rows up to ${lastProcessedRow} in file: ${key}`);
             logInfoToFile(`DEBUG: Enqueued batch job with ID: ${job.id} for rows up to ${lastProcessedRow} in file: ${key}`);
         
             // ✅ **Save Progress to `process_checkpoint.json`**

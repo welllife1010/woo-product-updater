@@ -1,3 +1,4 @@
+const path = require("path");
 const { performance } = require("perf_hooks"); // Import performance to track time
 
 const { logger, logErrorToFile, logUpdatesToFile, logInfoToFile } = require("./logger");
@@ -144,100 +145,139 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
     return false;
   }
 };
-
 // ***************************************************************************
-// Helper - Create new data for WooCommerce update
-// item: A single CSV row (passed as the item object)
-// Build an object that matches the format required by the WooCommerce Bulk API for updating products.
+// Helper - Normalize CSV headers
 // ***************************************************************************
-const createNewData =  (item, productId, part_number) => {
-  let additionalKeyInfo = [];
-  const normalizedItem = {};
-
-  // Normalize CSV headers by converting them to lowercase and removing special characters
-  Object.keys(item).forEach(key => {
-    const normalizedKey = key.trim().toLowerCase().replace(/\s+/g, "_"); // Normalize key names
-    normalizedItem[normalizedKey] = item[key];
+const normalizeCsvHeaders = (item) => {
+  const normalizedRow = {};
+  Object.keys(item).forEach((key) => {
+    const normalizedKey = key.trim().toLowerCase().replace(/\s+/g, "_");
+    normalizedRow[normalizedKey] = item[key];
   });
+  return normalizedRow;
+};
 
-  // Define valid meta_data mappings using normalized CSV keys
-  // csvKey: normalized CSV key, metaDataKeyMappings: WooCommerce meta_data key
-  const metaDataKeyMappings = {
-      "manufacturer": "manufacturer",
-      "leadtime": "manufacturer_lead_weeks",
-      "image_url": "image_url",
-      // Remove the default datasheet mapping since we want custom logic for it:
-      // "datasheet": "datasheet_url",
-      "series": "series",
-      "quantity_available": "quantity",
-      "operating_temperature": "operating_temperature",
-      "voltage___supply": "voltage",
-      "package___case": "package",
-      "supplier_device_package": "supplier_device_package",
-      "mounting_type": "mounting_type",
-      "short_description": "short_description",
-      "part_description": "detail_description",
-      "reachstatus": "reach_status",
-      "rohsstatus": "rohs_status",
-      "moisturesensitivitylevel": "moisture_sensitivity_level",
-      "exportcontrolclassnumber": "export_control_class_number",
-      "htsuscode": "htsus_code"
+// ***************************************************************************
+// Helper - Format ACF field names
+// ***************************************************************************
+const formatAcfFieldName = (name) => {
+  return name
+    .replace(/_/g, " ")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (l) => l.toUpperCase()); // Capitalize each word
+};
+
+/**
+ * Creates a new WooCommerce product data object formatted for bulk updates.
+ *
+ * This function takes an individual product's data from a CSV row, normalizes its keys,
+ * maps known fields to WooCommerce meta_data fields, and processes additional unknown fields.
+ * 
+ * ### Key Features:
+ * - **Normalizes CSV headers** (lowercase, underscores for spaces).
+ * - **Maps CSV data** to WooCommerce's meta_data format.
+ * - **Handles `datasheet_url` separately** to exclude Digikey links.
+ * - **Extracts unknown fields** into `additional_key_information`.
+ * - **Ensures valid SKU generation** using available part numbers.
+ *
+ * @param {Object} item - A single row from a CSV file, representing a product.
+ * @param {number} productId - The WooCommerce product ID to update.
+ * @param {string} part_number - The part number of the product (fallback for missing values).
+ *
+ * @returns {Object} A structured product update object formatted for WooCommerce's Bulk API.
+ *
+ * ### Example Input:
+ * ```json
+ * {
+ *   "manufacturer": "Texas Instruments",
+ *   "leadtime": "10 Weeks",
+ *   "image_url": "https://example.com/image.jpg",
+ *   "datasheet": "https://example.com/datasheet.pdf",
+ *   "part_number": "ABC123",
+ *   "quantity_available": "1000"
+ * }
+ * ```
+ *
+ * ### Example Output:
+ * ```json
+ * {
+ *   "id": 12345,
+ *   "part_number": "ABC123",
+ *   "sku": "ABC123_Texas Instruments",
+ *   "description": "",
+ *   "meta_data": [
+ *     { "key": "manufacturer", "value": "Texas Instruments" },
+ *     { "key": "manufacturer_lead_weeks", "value": "10 Weeks" },
+ *     { "key": "image_url", "value": "https://example.com/image.jpg" },
+ *     { "key": "quantity", "value": "1000" },
+ *     { "key": "additional_key_information", "value": "" }
+ *   ]
+ * }
+ * ```
+ */
+const createNewData = (item, productId, part_number) => {
+  const normalizedCsvRow = normalizeCsvHeaders(item);
+  let additionalInfo = [];
+
+  // Define mapping of CSV headers to WooCommerce meta_data fields
+  const metaDataKeyMap = {
+    manufacturer: "manufacturer",
+    leadtime: "manufacturer_lead_weeks",
+    image_url: "image_url",
+    series: "series",
+    quantity_available: "quantity",
+    operating_temperature: "operating_temperature",
+    voltage___supply: "voltage",
+    package___case: "package",
+    supplier_device_package: "supplier_device_package",
+    mounting_type: "mounting_type",
+    short_description: "short_description",
+    part_description: "detail_description",
+    reachstatus: "reach_status",
+    rohsstatus: "rohs_status",
+    moisturesensitivitylevel: "moisture_sensitivity_level",
+    exportcontrolclassnumber: "export_control_class_number",
+    htsuscode: "htsus_code"
   };
 
-  // Build the meta_data array from the CSV headers (excluding datasheet for now)
-  let metaDataArray = Object.keys(metaDataKeyMappings)
-    .filter(csvKey => normalizedItem.hasOwnProperty(csvKey)) // Only include fields that exist in the CSV
-    .map(csvKey => ({
-      key: metaDataKeyMappings[csvKey],
-      value: normalizedItem[csvKey] || "" // Ensure missing values default to an empty string
+  // Process and map valid meta_data fields
+  const productMetaData = Object.keys(metaDataKeyMap)
+    .filter((csvKey) => normalizedCsvRow.hasOwnProperty(csvKey))
+    .map((csvKey) => ({
+      key: metaDataKeyMap[csvKey],
+      value: normalizedCsvRow[csvKey] || "",
     }));
 
-  
-  // Handle datasheet separately
-  if (normalizedItem.hasOwnProperty("datasheet")) {
-    const newDatasheet = normalizedItem["datasheet"] || "";
-    // Only add datasheet fields if new value does NOT contain "digikey"
-    if (!newDatasheet.toLowerCase().includes("digikey")) {
-      // Add both datasheet and datasheet_url fields
-      metaDataArray.push({ key: "datasheet", value: newDatasheet });
-      metaDataArray.push({ key: "datasheet_url", value: newDatasheet });
+  // Handle datasheet separately, excluding Digikey links
+  if (normalizedCsvRow.hasOwnProperty("datasheet")) {
+    const datasheetUrl = normalizedCsvRow["datasheet"] || "";
+    if (!datasheetUrl.toLowerCase().includes("digikey")) {
+      productMetaData.push({ key: "datasheet", value: datasheetUrl });
+      productMetaData.push({ key: "datasheet_url", value: datasheetUrl });
     }
-  }  
+  }
 
-  // Format and store any unknown fields in additional_key_information
-  const formatAcfFieldName = (name) => {
-    return name
-      .replace(/_/g, " ") // Replace underscores with spaces
-      .replace(/-/g, " ") // Replace dashes with spaces
-      .replace(/\b\w/g, l => l.toUpperCase()); // Capitalize each word
-  };
-
-  // Store unknown fields in additional_key_information
-  Object.keys(normalizedItem).forEach(key => {
-    if (!metaDataKeyMappings[key] && key !== "datasheet" && key !== "part_number" &&
-        formatAcfFieldName(key) != "Category" && formatAcfFieldName(key) != "Product Status") {
-      let value = normalizedItem[key] || "";
+  // Capture unknown fields into `additional_key_information`
+  Object.keys(normalizedCsvRow).forEach((key) => {
+    if (!metaDataKeyMap[key] && key !== "datasheet" && key !== "part_number") {
+      let value = normalizedCsvRow[key] || "";
       if (value !== "" && value !== "NaN") {
-        let label = formatAcfFieldName(key); 
-        additionalKeyInfo.push(`<strong>${label}:</strong> ${value}<br>`);
+        additionalInfo.push(`<strong>${formatAcfFieldName(key)}:</strong> ${value}<br>`);
       }
     }
   });
 
-  // Ensure `additional_key_information` is never empty
-  const additionalKeyContent = additionalKeyInfo.length > 0 ? additionalKeyInfo.join("") : "";
-
   return {
-    id: productId, // Required for Bulk API
-    part_number: normalizedItem.part_number || part_number, // Use normalized key
-    sku: normalizedItem.sku || `${normalizedItem.part_number}_${normalizedItem.manufacturer}` || normalizedItem.part_number,
-    description: normalizedItem.part_description || "", // Corrected field mapping
+    id: productId,
+    part_number: normalizedCsvRow.part_number || part_number,
+    sku: normalizedCsvRow.sku || `${normalizedCsvRow.part_number}_${normalizedCsvRow.manufacturer}` || normalizedCsvRow.part_number,
+    description: normalizedCsvRow.part_description || "",
     meta_data: [
-      ...metaDataArray, // Only include valid CSV-based meta_data
-      { key: "additional_key_information", value: additionalKeyContent } // Store only extra unknown fields
-    ]
+      ...productMetaData,
+      { key: "additional_key_information", value: additionalInfo.length > 0 ? additionalInfo.join("") : "" },
+    ],
   };
-}
+};
 
 // ***************************************************************************
 // Helper - Filter current product data

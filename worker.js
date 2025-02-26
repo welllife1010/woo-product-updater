@@ -4,7 +4,7 @@ const { Worker } = require("bullmq");
 const { logErrorToFile, logInfoToFile } = require("./logger");
 const { redisClient } = require('./queue');
 const { processBatch } = require('./batch-helpers'); 
-const { getCheckpoint, saveCheckpoint } = require("./checkpoint");
+const { getLastProcessedRow, saveCheckpoint } = require("./checkpoint");
 
 // Initialize dynamic concurrency and batch size
 let concurrency = parseInt(process.env.CONCURRENCY) || 2;
@@ -40,7 +40,7 @@ const batchWorker = new Worker(
             }
 
             // 1) Get the current checkpoint from local file for this fileKey.
-            let lastProcessedRow = getCheckpoint(fileKey);
+            let lastProcessedRow = getLastProcessedRow(fileKey);
             logInfoToFile(`📌 Last processed row (local file): ${lastProcessedRow} for fileKey=${fileKey}`);
 
             // 2) Process the batch
