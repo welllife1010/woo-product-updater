@@ -16,13 +16,9 @@ let stripHtml;
 // Helper - Normalize input texts
 // ***************************************************************************
 const normalizeText = (text) => {
-    if (!text) return "";
-
-    // Strip HTML tags
-    let normalized = stripHtml(text)?.result.trim()|| "";
-
-    // Replace special characters; Normalize whitespace and line breaks
-    return normalized.replace(/\u00ac\u00c6/g, "®").replace(/&deg;/g, "°").replace(/\s+/g, " ");
+  if (!text || typeof text !== "string") return ""; // ✅ Ensure text is a valid string
+  let normalized = stripHtml(text)?.result.trim() || "";
+  return normalized.replace(/\u00ac\u00c6/g, "®").replace(/&deg;/g, "°").replace(/\s+/g, " ");
 };
 
 // ***************************************************************************
@@ -84,8 +80,8 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
             logInfoToFile(`Skipping update for ${newMeta.key} because new value contains "digikey"`);
             return;
           }
-          // If the current datasheet value already contains "suntsu-products-s3-bucket", skip updating.
-          if (currentMetaValue && currentMetaValue.toLowerCase().includes("suntsu-products-s3-bucket")) {
+          // If the current datasheet value already contains "suntsu-products-s3-bucket", skip updating. Ensure update only happens if current value is different
+          if (currentMetaValue && currentMetaValue.toLowerCase().includes("suntsu-products-s3-bucket") && currentMetaValue !== newMetaValue) {
             logInfoToFile(`Skipping update for ${newMeta.key} because current value contains "suntsu-products-s3-bucket"`);
             return;
           }
@@ -258,14 +254,41 @@ const createNewData = (item, productId, part_number) => {
   }
 
   // Capture unknown fields into `additional_key_information`
-  Object.keys(normalizedCsvRow).forEach((key) => {
-    if (!metaDataKeyMap[key] && key !== "datasheet" && key !== "part_number") {
-      let value = normalizedCsvRow[key] || "";
-      if (value !== "" && value !== "NaN") {
-        additionalInfo.push(`<strong>${formatAcfFieldName(key)}:</strong> ${value}<br>`);
+  // Object.keys(normalizedCsvRow).forEach((key) => {
+  //   if (!metaDataKeyMap[key] && key !== "datasheet" && key !== "part_number") {
+  //     let value = normalizedCsvRow[key] || "";
+  //     if (value !== "" && value !== "NaN") {
+  //       additionalInfo.push(`<strong>${formatAcfFieldName(key)}:</strong> ${value}<br>`);
+  //     }
+  //   }
+  // });
+
+  // Use additional_info directly if available
+  additionalInfo = normalizedCsvRow["additional_info"] || "";
+
+  // If additional_info is not present, fallback to manually constructing it
+  if (!additionalInfo) {
+    Object.keys(normalizedCsvRow).forEach((key) => {
+      if (!metaDataKeyMap[key] && key !== "datasheet" && key !== "part_number" && key !== "additional_info") {
+        let value = normalizedCsvRow[key] || "";
+        if (value !== "" && value !== "NaN") {
+          let formattedKey = formatAcfFieldName(key);
+
+          // Ensure we do not duplicate known fields
+          const excludedFields = [
+            "Part Title", "Category", "Product Status", "RF Type", "Topology", "Circuit",
+            "Frequency Range", "Isolation", "Insertion Loss", "Test Frequency", "P1dB",
+            "IIP3", "Features", "Impedance", "Voltage – Supply", "Operating Temperature",
+            "Mounting Type", "Package / Case", "Supplier Device Package"
+          ];
+
+          if (!excludedFields.includes(formattedKey)) {
+            additionalInfo += `<strong>${formattedKey}:</strong> ${value}<br>`;
+          }
+        }
       }
-    }
-  });
+    });
+  }
 
   return {
     id: productId,
@@ -274,20 +297,62 @@ const createNewData = (item, productId, part_number) => {
     description: normalizedCsvRow.part_description || "",
     meta_data: [
       ...productMetaData,
-      { key: "additional_key_information", value: additionalInfo.length > 0 ? additionalInfo.join("") : "" },
+      { key: "additional_key_information", value: additionalInfo || "" },
     ],
   };
 };
 
-// ***************************************************************************
-// Helper - Filter current product data
-// ***************************************************************************
+/**
+ * Filters an existing WooCommerce product object, extracting only relevant fields for comparison.
+ *
+ * This function is used before checking if a product update is needed. 
+ * It removes unnecessary metadata and keeps only fields that are tracked in WooCommerce.
+ *
+ * ### Key Features:
+ * - **Extracts SKU and Description** for easy comparison.
+ * - **Filters meta_data** to keep only required fields.
+ * - **Used in the `isUpdateNeeded` function** for detecting required updates.
+ *
+ * @param {Object} product - The existing WooCommerce product object.
+ * 
+ * @returns {Object} A filtered product object containing only relevant fields.
+ *
+ * ### Example Input:
+ * ```json
+ * {
+ *   "sku": "ABC123",
+ *   "description": "Some electronic component",
+ *   "meta_data": [
+ *     { "key": "manufacturer", "value": "Texas Instruments" },
+ *     { "key": "image_url", "value": "https://example.com/image.jpg" },
+ *     { "key": "random_field", "value": "this should be removed" }
+ *   ]
+ * }
+ * ```
+ *
+ * ### Example Output:
+ * ```json
+ * {
+ *   "sku": "ABC123",
+ *   "description": "Some electronic component",
+ *   "meta_data": [
+ *     { "key": "manufacturer", "value": "Texas Instruments" },
+ *     { "key": "image_url", "value": "https://example.com/image.jpg" }
+ *   ]
+ * }
+ * ```
+ */
 const filterCurrentData = (product) => {
   return {
     sku: product.sku,
     description: product.description,
     meta_data: product.meta_data.filter((meta) =>
-        ["spq", "manufacturer", "image_url", "datasheet_url", "series_url", "series", "quantity", "operating_temperature", "voltage", "package", "supplier_device_package", "mounting_type", "short_description", "detail_description", "additional_key_information", "reach_status", "rohs_status", "moisture_sensitivity_level", "export_control_class_number", "htsus_code"].includes(meta.key)
+      [
+        "spq", "manufacturer", "image_url", "datasheet_url", "series_url", "series", "quantity",
+        "operating_temperature", "voltage", "package", "supplier_device_package", "mounting_type",
+        "short_description", "detail_description", "additional_key_information", "reach_status",
+        "rohs_status", "moisture_sensitivity_level", "export_control_class_number", "htsus_code"
+      ].includes(meta.key)
     ),
   };
 };
@@ -384,8 +449,8 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       logInfoToFile(`"processBatch()" - product: ${product} | newData: ${JSON.stringify(newData)} | currentData: ${JSON.stringify(currentData)}`);
 
       logInfoToFile(`"processBatch()" - Checking product data for part_number=${part_number}`);
-      logInfoToFile(`Current Data: ${JSON.stringify(currentData, null, 2)}`);
-      logInfoToFile(`New Data: ${JSON.stringify(newData, null, 2)}`);
+      //logInfoToFile(`Current Data: ${JSON.stringify(currentData, null, 2)}`);
+      //logInfoToFile(`New Data: ${JSON.stringify(newData, null, 2)}`);
 
       
       if (product && isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey)) {
