@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const { performance } = require("perf_hooks"); // Import performance to track time
 
