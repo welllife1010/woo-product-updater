@@ -445,27 +445,58 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
       // 1b) Fetch existing product from Woo to see if an update is needed
       const product = await getProductById(productId, fileKey, currentIndex);
+      if (!product) {
+        localFailCount++;
+        continue;
+      }
+
       const newData = createNewData(item, productId, part_number);
       const currentData = filterCurrentData(product);
 
-      logInfoToFile(`"processBatch()" - product: ${product} | newData: ${JSON.stringify(newData)} | currentData: ${JSON.stringify(currentData)}`);
-
+      logInfoToFile(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
       logInfoToFile(`"processBatch()" - Checking product data for part_number=${part_number}`);
-      //logInfoToFile(`Current Data: ${JSON.stringify(currentData, null, 2)}`);
-      //logInfoToFile(`New Data: ${JSON.stringify(newData, null, 2)}`);
 
+      // Check if any update is needed
+      if (!isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey)) {
+        skipCount++;
+        continue;
+      }
+
+      const fieldsToUpdate = [];
       
-      if (product && isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey)) {
-        toUpdate.push(newData);
-        logInfoToFile(`Adding part_number=${part_number} to the update list`);
+      // Iterate over meta_data and only add changed fields
+      newData.meta_data.forEach(newMeta => {
+        const currentMeta = currentData.meta_data.find(meta => meta.key === newMeta.key);
+        const currentMetaValue = currentMeta?.value || "";
+        const newMetaValue = newMeta.value;
+
+        // 🚀 Skip updating image_url if it contains "digikey.com"
+        if (newMeta.key === "image_url" && newMetaValue.includes("digikey.com")) {
+          logInfoToFile(`Skipping update for image_url as it contains "digikey.com"`);
+          return;
+        }
+
+        // 🚀 Skip updating datasheet_url if it contains "digikey.com"
+        if ((newMeta.key === "datasheet_url" || newMeta.key === "datasheet") && newMetaValue.includes("digikey.com")) {
+          logInfoToFile(`Skipping update for datasheet as it contains "digikey.com"`);
+          return;
+        }
+
+        if (isCurrentMetaMissing(newMetaValue, currentMeta) || isMetaValueDifferent(newMetaValue, currentMetaValue)) {
+          fieldsToUpdate.push(newMeta);
+        }
+      });
+
+      if (fieldsToUpdate.length > 0) {
+        toUpdate.push({ id: productId, meta_data: fieldsToUpdate });
       } else {
-        logInfoToFile(`No update needed for part_number=${part_number}`);  
         skipCount++;
       }
     } catch (err) {
       localFailCount++;
       logErrorToFile(`Error processing part_number=${part_number}: ${err.message}`, err.stack);
     }
+
   }
 
   // 1c) Increment skip/fail counters in Redis
@@ -530,9 +561,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
         // 3b) Log each item that was "intended" to update
         for (const product of toUpdate) {
-          logUpdatesToFile(
-            `Updated part_number=${product.part_number} in file=${fileKey}`
-          );
+          logUpdatesToFile(`Updated part_number=${product.part_number} in file=${fileKey}`);
         }
       }
 
