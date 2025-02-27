@@ -89,7 +89,7 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
         }
 
         // **🚀 Special check for Image_Url containing "digikey.com"**
-        if (newMeta.key === "image_url" && newMetaValue.includes("digikey.com")) {
+        if (newMeta.key === "image_url" && (newMetaValue.includes("digikey.com") || newMetaValue.includes("mm.digikey.com"))) {
           logInfoToFile(`⚠️ Skipping update for image_url as it contains "digikey.com"`);
           return; // **Skip updating this field**
         }
@@ -142,6 +142,7 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
     return false;
   }
 };
+
 // ***************************************************************************
 // Helper - Normalize CSV headers
 // ***************************************************************************
