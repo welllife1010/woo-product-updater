@@ -6,6 +6,7 @@ const WooCommerceRestApi = require("woocommerce-rest-ts-api").default;
 const { logger, logErrorToFile, logInfoToFile } = require("./logger");
 const { limiter, scheduleApiRequest } = require('./job-manager');
 const { createUniqueJobId } = require('./utils');
+const { redisClient } = require('./queue');
 
 // Function to get WooCommerce API credentials based on execution mode
 const getWooCommerceApiCredentials = (executionMode) => {
@@ -25,12 +26,6 @@ const getWooCommerceApiCredentials = (executionMode) => {
 };
 
 const wooApi = new WooCommerceRestApi(getWooCommerceApiCredentials(process.env.EXECUTION_MODE));
-
-// Create a Bottleneck instance with appropriate settings
-// const limiter = new Bottleneck({
-//     maxConcurrent: 2, // Number of concurrent requests allowed - Limit to 2 concurrent 100-item requests at once
-//     minTime: 1000, // Minimum time between requests (in milliseconds) - 500ms between each request
-// });
 
 // Define a Set to keep track of products that were retried
 const retriedProducts = new Set();
@@ -105,9 +100,20 @@ const getProductById = async (productId, fileKey, currentIndex) => {
 };
   
 // Find product ID by custom field "part_number"
-const getProductIdByPartNumber = async (partNumber, currentIndex, totalProducts, fileKey) => {
+const getProductIdByPartNumber = async (partNumber, manufacturer, currentIndex, totalProducts, fileKey) => {
     let attempts = 0;
     const action = 'getProductIdByPartNumber';
+    let page = 1; // Start pagination
+    let perPage = 5; // ✅ Fetch 5 products at a time
+    let maxPages = 5; // ✅ Limit search to 5 pages
+
+    // ✅ Check Redis cache before making WooCommerce API calls
+    const cacheKey = `productId:${partNumber}:${manufacturer}`;
+    const cachedProductId = await redisClient.get(cacheKey);
+    if (cachedProductId) {
+        logInfoToFile(`✅ Using cached Product ID ${cachedProductId} for Part Number: ${partNumber} | Manufacturer: ${manufacturer}`);
+        return cachedProductId; // ✅ Return cached result
+    }
 
     while (attempts < 5) {
         // Create a unique job ID
@@ -115,27 +121,42 @@ const getProductIdByPartNumber = async (partNumber, currentIndex, totalProducts,
 
         try {
 
-            // Use the centralized job scheduling function
-            const response = await scheduleApiRequest(
-                () => wooApi.get("products", { search: partNumber, per_page: 1 }), // Task function for API call
-                { 
-                    id: jobId,
-                    context: { 
-                        file: "woo-helpers.js", 
-                        functionName: "getProductIdByPartNumber", 
-                        part: `${partNumber}`
+            while (page <= maxPages) { // ✅ Limit to 5 pages to prevent unnecessary API calls
+
+                const response = await scheduleApiRequest(
+                    () => wooApi.get("products", { search: partNumber, per_page: perPage, page }), // ✅ Fetch multiple products
+                    { 
+                        id: jobId,
+                        context: { file: "woo-helpers.js", functionName: "getProductIdByPartNumber", part: `${partNumber}` }
+                    }
+                );
+    
+                if (!response.data.length) {
+                    logErrorToFile(`❌ No exact manufacturer match found for Part Number: ${partNumber} in file "${fileKey}" after checking ${page - 1} pages.`);
+                    return null;
+                }
+    
+                // ✅ Loop through results to find the correct manufacturer match
+                for (const product of response.data) {
+                    const productManufacturer = product.meta_data.find(meta => meta.key === "manufacturer")?.value?.trim() || "";
+    
+                    if (productManufacturer === manufacturer) {
+                        logInfoToFile(`✅ Found exact match for Part Number: ${partNumber} | Manufacturer: ${manufacturer} in file "${fileKey}".`);
+    
+                        // ✅ Store result in Redis with TTL (e.g., expire after 24 hours)
+                        await redisClient.set(cacheKey, product.id, { EX: 86400 });
+    
+                        return product.id; // ✅ Return the correct product
                     }
                 }
-            );
-
-            // Check if the product was found
-            if (response.data.length) {
-                logger.info(`${currentIndex} / ${totalProducts} - Product ID ${response.data[0].id} found for Part Number ${partNumber} in file "${fileKey}"`);
-                return response.data[0].id;
-            } else {
-                logErrorToFile(`${currentIndex} / ${totalProducts} - No product found for Part Number ${partNumber} in file "${fileKey}"`)
-                return null;
+    
+                logInfoToFile(`🔄 No manufacturer match on page ${page} for Part Number: ${partNumber}. Checking next page...`);
+                page++; // ✅ Continue searching the next batch
+            
             }
+    
+            logErrorToFile(`❌ Max page limit reached (${maxPages}) for Part Number: ${partNumber}. No exact manufacturer match found.`);
+            return null;
 
         } catch (error) {
             attempts++;

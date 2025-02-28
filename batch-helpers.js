@@ -96,7 +96,7 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
     
         // Check if the current meta is missing or if values differ
         if (isCurrentMetaMissing(newMetaValue, currentMeta)) {
-            logInfoToFile(`DEBUG: Key '${newMeta.key}' missing in currentData meta_data for Part Number: ${partNumber} in file ${fileName}. Marking for update. \n`);
+            logInfoToFile(`DEBUG: Key '${newMeta.key}' missing in currentData (old) meta_data for Part Number: ${partNumber} in file ${fileName}. Marking for update. \n`);
             fieldsToUpdate.push(`meta_data.${newMeta.key}`);
             return true;
         }
@@ -410,9 +410,9 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   let localFailCount = 0;
 
   for (let i = 0; i < batch.length; i++) {
-
     let item = batch[i];
     let part_number = item.part_number;
+    let manufacturer = item.manufacturer?.trim() || "";
 
     const currentIndex = startIndex + i;
     
@@ -422,7 +422,6 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
     logInfoToFile(`"processBatch()" - Processing part_number=${part_number}`);
     logInfoToFile(`"processBatch()" - currentIndex >= totalProductsInFile=${currentIndex >= totalProductsInFile}`);
 
-    
     if (currentIndex >= totalProductsInFile) break;
       
     if (!part_number) {
@@ -453,6 +452,23 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       const newData = createNewData(item, productId, part_number);
       const currentData = filterCurrentData(product);
 
+      // ✅ Extract `part_number` from WooCommerce's meta_data field
+      let currentPartNumber = currentData.meta_data.find(meta => meta.key === "part_number")?.value?.trim() || "";
+      let currentManufacturer = currentData.meta_data.find(meta => meta.key === "manufacturer")?.value?.trim() || "";
+      
+      // ✅ If `part_number` is missing, use the product title as a fallback
+      if (!currentPartNumber) {
+        currentPartNumber = currentData.name?.trim() || ""; 
+      }
+
+      // 🚀 Ensure both "part_number" and "manufacturer" match exactly
+      if (newData.part_number !== currentPartNumber || manufacturer !== currentManufacturer) {
+        logInfoToFile(`Skipping update: newData.part_number="${newData.part_number}" (CSV) does not match currentPartNumber="${currentPartNumber}" (WooCommerce) ` +
+          `OR newData.manufacturer="${manufacturer}" (CSV) does not match currentManufacturer="${currentManufacturer}" (WooCommerce)`);
+        skipCount++;
+        continue;
+      }
+
       logInfoToFile(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
       logInfoToFile(`"processBatch()" - Checking product data for part_number=${part_number}`);
 
@@ -463,6 +479,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       }
 
       const fieldsToUpdate = [];
+      const changedFields = [];
       
       // Iterate over meta_data and only add changed fields
       newData.meta_data.forEach(newMeta => {
@@ -484,11 +501,16 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
         if (isCurrentMetaMissing(newMetaValue, currentMeta) || isMetaValueDifferent(newMetaValue, currentMetaValue)) {
           fieldsToUpdate.push(newMeta);
+          changedFields.push({ key: newMeta.key, oldValue: currentMetaValue, newValue: newMetaValue });
         }
       });
 
       if (fieldsToUpdate.length > 0) {
         toUpdate.push({ id: productId, meta_data: fieldsToUpdate });
+
+        // 🚀 Log only the fields that are different
+        logInfoToFile(`Fields updated for part_number="${newData.part_number}":\n` +
+        changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n"));
       } else {
         skipCount++;
       }
@@ -562,6 +584,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         // 3b) Log each item that was "intended" to update
         for (const product of toUpdate) {
           logUpdatesToFile(`Updated part_number=${product.part_number} in file=${fileKey}`);
+          logUpdatesToFile(`Updated part_number=${part_number} in file=${fileKey}`);
         }
       }
 
