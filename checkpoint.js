@@ -101,6 +101,9 @@ async function saveCheckpoint(fileKey, lastProcessedRow, totalRows) {
  * getLastProcessedRow returns the lastProcessedRow stored in process_checkpoint.json.
  */
 function getLastProcessedRow(fileKey) {
+
+  logInfoToFile(`"getLastProcessedRow" - Start to check the lastProcessRow value for fileKey=${fileKey}`);
+
     if (!fileKey || typeof fileKey !== "string") {
       logErrorToFile(`❌ getLastProcessedRow missing valid fileKey`);
       return 0;
@@ -122,6 +125,9 @@ function getLastProcessedRow(fileKey) {
   
       // The structure here matches what we wrote in saveCheckpoint
       const lastProcessedRow = checkpoints[fileKey].rowLevel?.lastProcessedRow;
+
+      logInfoToFile(`"getLastProcessedRow" - lastProcessedRow=${lastProcessedRow} for fileKey=${fileKey}`);
+
       if (typeof lastProcessedRow === "number") {
         return lastProcessedRow;
       } else {

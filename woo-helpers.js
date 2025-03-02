@@ -107,11 +107,14 @@ const getProductIdByPartNumber = async (partNumber, manufacturer, currentIndex, 
     let perPage = 5; // ✅ Fetch 5 products at a time
     let maxPages = 5; // ✅ Limit search to 5 pages
 
+    // ✅ Normalize manufacturer for case-insensitive comparison
+    const normalizedManufacturer = (typeof manufacturer === "string" ? manufacturer.trim().toLowerCase() : "");
+
     // ✅ Check Redis cache before making WooCommerce API calls
-    const cacheKey = `productId:${partNumber}:${manufacturer}`;
+    const cacheKey = `productId:${partNumber}:${normalizedManufacturer}`;
     const cachedProductId = await redisClient.get(cacheKey);
     if (cachedProductId) {
-        logInfoToFile(`✅ Using cached Product ID ${cachedProductId} for Part Number: ${partNumber} | Manufacturer: ${manufacturer}`);
+        logInfoToFile(`"getProductIdByPartNumber()" - ✅ Using cached Product ID ${cachedProductId} for Part Number: ${partNumber} | Manufacturer: ${manufacturer}`);
         return cachedProductId; // ✅ Return cached result
     }
 
@@ -132,43 +135,47 @@ const getProductIdByPartNumber = async (partNumber, manufacturer, currentIndex, 
                 );
     
                 if (!response.data.length) {
-                    logErrorToFile(`❌ No exact manufacturer match found for Part Number: ${partNumber} in file "${fileKey}" after checking ${page - 1} pages.`);
+                    logErrorToFile(`"getProductIdByPartNumber()" - ❌ No exact manufacturer match found for Part Number: ${partNumber} in file "${fileKey}" after checking ${page - 1} pages.`);
                     return null;
                 }
     
                 // ✅ Loop through results to find the correct manufacturer match
                 for (const product of response.data) {
-                    const productManufacturer = product.meta_data.find(meta => meta.key === "manufacturer")?.value?.trim() || "";
+                    const productManufacturer = product.meta_data.find(meta => meta.key === "manufacturer")?.value?.trim().toLowerCase() || "";
+
+                    logInfoToFile(`"getProductIdByPartNumber()" - 🔎 Checking Part Number: ${partNumber} -> WooCommerce Manufacturer: "${productManufacturer}" vs CSV Manufacturer: "${normalizedManufacturer}"`);
     
-                    if (productManufacturer === manufacturer) {
-                        logInfoToFile(`✅ Found exact match for Part Number: ${partNumber} | Manufacturer: ${manufacturer} in file "${fileKey}".`);
+                    if (productManufacturer === normalizedManufacturer) {
+                        logInfoToFile(`"getProductIdByPartNumber()" - ✅ Found exact match for Part Number: ${partNumber} | Manufacturer: ${manufacturer} in file "${fileKey}".`);
     
                         // ✅ Store result in Redis with TTL (e.g., expire after 24 hours)
                         await redisClient.set(cacheKey, product.id, { EX: 86400 });
+                        logInfoToFile(`"getProductIdByPartNumber()" - ✅ Caching Product ID ${product.id} in Redis.`);
     
+                        logInfoToFile(`"getProductIdByPartNumber()" - ✅ returning Product ID ${product.id} for Part Number: ${partNumber} | Manufacturer: ${manufacturer}`);
                         return product.id; // ✅ Return the correct product
                     }
                 }
     
-                logInfoToFile(`🔄 No manufacturer match on page ${page} for Part Number: ${partNumber}. Checking next page...`);
+                logInfoToFile(`"getProductIdByPartNumber()" - 🔄 No manufacturer match on page ${page} for Part Number: ${partNumber}. Checking next page...`);
                 page++; // ✅ Continue searching the next batch
             
             }
     
-            logErrorToFile(`❌ Max page limit reached (${maxPages}) for Part Number: ${partNumber}. No exact manufacturer match found.`);
+            logErrorToFile(`"getProductIdByPartNumber()" - ❌ Max page limit reached (${maxPages}) for Part Number: ${partNumber}. No exact manufacturer match found.`);
             return null;
 
         } catch (error) {
             attempts++;
-            logErrorToFile(`Attempt ${attempts} failed for job ID: ${jobId}. Error: ${error.message}`);
+            logErrorToFile(`"getProductIdByPartNumber()" - Attempt ${attempts} failed for job ID: ${jobId}. Error: ${error.message}`);
 
             if (attempts >= 5) {
-                logErrorToFile(`Failed permanently after ${attempts} attempts for job ID: ${jobId}`);
+                logErrorToFile(`"getProductIdByPartNumber()" - Failed permanently after ${attempts} attempts for job ID: ${jobId}`);
                 return null;
             }
 
             const delay = Math.pow(2, attempts) * 1000;
-            logInfoToFile(`Retrying job ID: ${jobId} after ${delay / 1000}s...`);
+            logInfoToFile(`"getProductIdByPartNumber()" - Retrying job ID: ${jobId} after ${delay / 1000}s...`);
             await new Promise(resolve => setTimeout(resolve, delay));
         }
     }

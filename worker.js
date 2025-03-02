@@ -1,5 +1,4 @@
 require("dotenv").config();
-const { performance } = require("perf_hooks");
 const { Worker } = require("bullmq");
 const { logErrorToFile, logInfoToFile } = require("./logger");
 const { redisClient } = require('./queue');
@@ -39,14 +38,18 @@ const batchWorker = new Worker(
                 logErrorToFile(`❌ Job ${job.id} has an empty batch. Something went wrong.`);
             }
 
+            logInfoToFile(`"batchWorker" Worker - 🔍 Checking last processed row BEFORE calling getLastProcessedRow() for fileKey=${fileKey}`);
             // 1) Get the current checkpoint from local file for this fileKey.
             let lastProcessedRow = getLastProcessedRow(fileKey);
-            logInfoToFile(`📌 Last processed row (local file): ${lastProcessedRow} for fileKey=${fileKey}`);
+            logInfoToFile(`"batchWorker" Worker - 📌 Retrieved lastProcessedRow=${lastProcessedRow} for fileKey=${fileKey}`);
 
             // 2) Process the batch
             //    The processBatch function can do the WooCommerce updates, etc.
             //    Note: processBatch may internally increment "updated"/"skipped"/"failed" in Redis.
+            logInfoToFile(`"batchWorker" Worker - 🔍 About to call processBatch() for FileKey=${fileKey}, lastProcessedRow=${lastProcessedRow}`);
             await processBatch(batch, lastProcessedRow, totalProductsInFile, fileKey);
+            logInfoToFile(`"batchWorker" Worker - ✅ processBatch() completed for FileKey=${fileKey}`);
+
 
             // 3) After successfully process the batch, update our lastProcessedRow.
             //    For example, if we processed 20 rows in this batch:

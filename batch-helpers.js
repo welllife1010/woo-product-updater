@@ -8,12 +8,10 @@ const { redisClient } = require('./queue');
 const { scheduleApiRequest } = require('./job-manager');
 const { createUniqueJobId } = require('./utils');
 
-const { stripHtml } = require("string-strip-html");
-
-// let stripHtml;
-// (async () => {
-//   stripHtml = (await import("string-strip-html")).stripHtml;
-// })();
+let stripHtml;
+(async () => {
+  stripHtml = (await import("string-strip-html")).stripHtml;
+})();
 
 // ***************************************************************************
 // Helper - Normalize input texts
@@ -50,8 +48,12 @@ function isMetaValueDifferent(newMetaValue, currentMetaValue) {
 // ***************************************************************************
 const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile, partNumber, fileName) => {
   const fieldsToUpdate = [];
-  let logBuffer = [`"isUpdateNeeded()" - Checking updates for Part Number: ${partNumber} in ${fileName}`];
-  //logInfoToFile(`"isUpdateNeeded()" - Checking for updates for Part Number: ${partNumber} in ${fileName}`);
+  //let logBuffer = [`"isUpdateNeeded()" - Checking updates for Part Number: ${partNumber} in ${fileName}`];
+  logInfoToFile(`"isUpdateNeeded()" - Checking for updates for Part Number: ${partNumber} in ${fileName}`);
+
+  // 🔍 Debug current vs new data comparison
+  logInfoToFile(`🔎 currentData: ${JSON.stringify(currentData, null, 2)}`);
+  logInfoToFile(`🔎 newData: ${JSON.stringify(newData, null, 2)}`);
 
   Object.keys(newData).forEach((key) => {
     if (key === "id" || key === "part_number") return;
@@ -63,7 +65,7 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
     if (key === "meta_data") {
       if (!Array.isArray(newValue) || !Array.isArray(currentValue)) {
           //logger.info(`DEBUG: meta_data is not an array in either current or new data for Part Number: ${partNumber} in ${fileName}.`);
-          logBuffer.push(`meta_data is not an array for ${partNumber}. Marking for update.`);
+          //logBuffer.push(`meta_data is not an array for ${partNumber}. Marking for update.`);
           fieldsToUpdate.push(key);
           return true;
       }
@@ -71,43 +73,49 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
       newValue.forEach((newMeta) => {
         const newMetaValue = newMeta.value;
         const currentMeta = currentValue.find(meta => meta.key === newMeta.key);
-        const currentMetaValue = currentMeta?.value;
+        const currentMetaValue = currentMeta?.value || "";
+
+        if (newMetaValue !== currentMetaValue) {
+          fieldsToUpdate.push(`meta_data.${newMeta.key}`);
+          logInfoToFile(`✅ Update needed for key '${newMeta.key}': "${currentMetaValue}" → "${newMetaValue}"`);
+          //logBuffer.push(`✅ Update needed for key '${newMeta.key}': "${currentMetaValue}" → "${newMetaValue}"`);
+        }
 
         // Special check for datasheet fields
         if (newMeta.key === "datasheet" || newMeta.key === "datasheet_url") {
           // If the new datasheet value contains "digikey", skip updating this field.
           if (newMetaValue.toLowerCase().includes("digikey")) {
-            //logInfoToFile(`Skipping update for ${newMeta.key} because new value contains "digikey"`);
-            logBuffer.push(`Skipping update for ${newMeta.key} because new value contains "digikey"`);
+            logInfoToFile(`Skipping update for ${newMeta.key} because new value contains "digikey"`);
+            //logBuffer.push(`Skipping update for ${newMeta.key} because new value contains "digikey"`);
             return;
           }
           // If the current datasheet value already contains "suntsu-products-s3-bucket", skip updating. Ensure update only happens if current value is different
           if (currentMetaValue && currentMetaValue.toLowerCase().includes("suntsu-products-s3-bucket") && currentMetaValue !== newMetaValue) {
-            //logInfoToFile(`Skipping update for ${newMeta.key} because current value contains "suntsu-products-s3-bucket"`);
-            logBuffer.push(`Skipping update for ${newMeta.key} because current value contains "suntsu-products-s3-bucket"`);
+            logInfoToFile(`Skipping update for ${newMeta.key} because current value contains "suntsu-products-s3-bucket"`);
+            //logBuffer.push(`Skipping update for ${newMeta.key} because current value contains "suntsu-products-s3-bucket"`);
             return;
           }
         }
 
         // **🚀 Special check for Image_Url containing "digikey.com"**
         if (newMeta.key === "image_url" && (newMetaValue.includes("digikey.com") || newMetaValue.includes("mm.digikey.com"))) {
-          //logInfoToFile(`⚠️ Skipping update for image_url as it contains "digikey.com"`);
-          logBuffer.push(`⚠️ Skipping update for image_url as it contains "digikey.com"`);
+          logInfoToFile(`⚠️ Skipping update for image_url as it contains "digikey.com"`);
+          //logBuffer.push(`⚠️ Skipping update for image_url as it contains "digikey.com"`);
           return; // **Skip updating this field**
         }
     
         // Check if the current meta is missing or if values differ
         if (isCurrentMetaMissing(newMetaValue, currentMeta)) {
-            //logInfoToFile(`DEBUG: Key '${newMeta.key}' missing in currentData (old) meta_data for Part Number: ${partNumber} in file ${fileName}. Marking for update. \n`);
-            logBuffer.push(`DEBUG: Key '${newMeta.key}' missing in currentData (old) meta_data for Part Number: ${partNumber} in file ${fileName}. Marking for update. \n`);
+            logInfoToFile(`DEBUG: Key '${newMeta.key}' missing in currentData (old) meta_data for Part Number: ${partNumber} in file ${fileName}. Marking for update. \n`);
+            //logBuffer.push(`DEBUG: Key '${newMeta.key}' missing in currentData (old) meta_data for Part Number: ${partNumber} in file ${fileName}. Marking for update. \n`);
             fieldsToUpdate.push(`meta_data.${newMeta.key}`);
             return true;
         }
     
         if (isMetaValueDifferent(newMetaValue, currentMetaValue)) {
             fieldsToUpdate.push(`meta_data.${newMeta.key}`);
-            //logInfoToFile(`Update needed for key '${newMeta.key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentMetaValue}', \nNew value: '${newMetaValue}' \n`);
-            logBuffer.push(`Update needed for key '${newMeta.key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentMetaValue}', \nNew value: '${newMetaValue}' \n`);
+            logInfoToFile(`Update needed for key '${newMeta.key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentMetaValue}', \nNew value: '${newMetaValue}' \n`);
+            // logBuffer.push(`Update needed for key '${newMeta.key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentMetaValue}', \nNew value: '${newMetaValue}' \n`);
         }
       })
     } else {
@@ -120,8 +128,8 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
       // Check if values are different or if current value is undefined
       if (currentValue === undefined || currentValue !== newValue) {
           fieldsToUpdate.push(key);
-          //logInfoToFile(`Update needed for key '${key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentValue}', \nNew value: '${newValue}' \n`);
-          logBuffer.push(`Update needed for key '${key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentValue}', \nNew value: '${newValue}' \n`);
+          logInfoToFile(`Update needed for key '${key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentValue}', \nNew value: '${newValue}' \n`);
+          // logBuffer.push(`Update needed for key '${key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentValue}', \nNew value: '${newValue}' \n`);
       }
     }
   });
@@ -139,7 +147,8 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
           : newData[field];
     });
 
-    logInfoToFile(logBuffer.join("\n"));
+    //logInfoToFile(logBuffer.join("\n"));
+    logInfoToFile(`✅ "isUpdateNeeded()" return "true" - Update needed for Part Number: ${partNumber} in ${fileName}`);
     return true;
   } else {
     logger.info(`No update required for Part Number: ${partNumber} in ${fileName}`);
@@ -340,11 +349,12 @@ const createNewData = (item, productId, part_number) => {
  */
 const filterCurrentData = (product) => {
   return {
+    name: product.name,
     sku: product.sku,
     description: product.description,
     meta_data: product.meta_data.filter((meta) =>
       [
-        "spq", "manufacturer", "image_url", "datasheet_url", "series_url", "series", "quantity",
+        "part_number", "spq", "manufacturer", "image_url", "datasheet_url", "series_url", "series", "quantity",
         "operating_temperature", "voltage", "package", "supplier_device_package", "mounting_type",
         "short_description", "detail_description", "additional_key_information", "reach_status",
         "rohs_status", "moisture_sensitivity_level", "export_control_class_number", "htsus_code"
@@ -357,7 +367,12 @@ const filterCurrentData = (product) => {
 // Helper - Record missing product data
 // ***************************************************************************
 const recordMissingProduct = (fileKey, item) => {
-  const missingFilePath = path.join(__dirname, `missing_products_${fileKey}.json`);
+
+  // ✅ Ensure fileKey does not have .csv before creating the file path
+  const cleanFileKey = fileKey.replace(/\.csv$/, ""); 
+
+  // ✅ Construct the correct missing file path
+  const missingFilePath = path.join(__dirname, `missing_products_${cleanFileKey}.json`);
   let missingProducts = [];
   
   // If the file exists, read its current content
@@ -369,12 +384,18 @@ const recordMissingProduct = (fileKey, item) => {
     }
   }
   
-  // Add the current item (from the CSV) to the array
+  // ✅  Add the current item (from the CSV) to the array
   missingProducts.push(item);
+
+   // ✅ Ensure the directory exists before writing the file
+   const dir = path.dirname(missingFilePath);
+   if (!fs.existsSync(dir)) {
+       fs.mkdirSync(dir, { recursive: true });
+   }
   
-  // Write the updated array back to the file
+  // ✅ Write the updated array back to the file
   fs.writeFileSync(missingFilePath, JSON.stringify(missingProducts, null, 2));
-  logInfoToFile(`Recorded missing product for part_number=${item.part_number}`);
+  logInfoToFile(`Recorded missing product for part_number=${item.part_number} in file ${missingFilePath}`);
 };
 
 // ***************************************************************************
@@ -388,15 +409,15 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   const action = "processBatch";
 
   const batchStartTime = performance.now();
-  let logBuffer = [`Starting "processBatch()" for fileKey=${fileKey}, startIndex=${startIndex}`];
-  //logInfoToFile(`Starting "processBatch()" with startIndex=${startIndex}, fileKey=${fileKey}`);
+  //let logBuffer = [`Starting "processBatch()" for fileKey=${fileKey}, startIndex=${startIndex}`];
+  logInfoToFile(`Starting "processBatch()" with startIndex=${startIndex}, fileKey=${fileKey}`);
 
   if (!Array.isArray(batch)) {
     throw new Error(`"processBatch()" - Expected batch to be an array, got ${typeof batch}`);
   }
 
-  //logInfoToFile(`"processBatch()" - Processing batch of ${batch.length} items for fileKey=${fileKey}`);
-  logBuffer.push(`"processBatch()" - Processing batch of ${batch.length} items for fileKey=${fileKey}`);
+  logInfoToFile(`"processBatch()" - Processing batch of ${batch.length} items for fileKey=${fileKey}`);
+  //logBuffer.push(`"processBatch()" - Processing batch of ${batch.length} items for fileKey=${fileKey}`);
 
   // ──────────────────────────────────────────────────────────
   // 1) Determine which items truly need an update
@@ -412,14 +433,14 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
     const currentIndex = startIndex + i;
     
-    // logInfoToFile(`"processBatch()" - Processing item=${item}`);
-    // logInfoToFile(`"processBatch()" - item.part_number=${item.part_number}`);
-    // logInfoToFile(`"processBatch()" - Processing part_number=${part_number}`);
-    // logInfoToFile(`"processBatch()" - currentIndex >= totalProductsInFile=${currentIndex >= totalProductsInFile}`);
-    logBuffer.push(`"processBatch()" - Processing item=${item}`);
-    logBuffer.push(`"processBatch()" - item.part_number=${item.part_number}`);
-    logBuffer.push(`"processBatch()" - Processing part_number=${part_number}`);
-    logBuffer.push(`"processBatch()" - currentIndex >= totalProductsInFile=${currentIndex >= totalProductsInFile}`);
+    logInfoToFile(`"processBatch()" - Processing item=${item}`);
+    logInfoToFile(`"processBatch()" - item.part_number=${item.part_number}`);
+    logInfoToFile(`"processBatch()" - Processing part_number=${part_number}`);
+    logInfoToFile(`"processBatch()" - currentIndex >= totalProductsInFile=${currentIndex >= totalProductsInFile}`);
+    // logBuffer.push(`"processBatch()" - Processing item=${item}`);
+    // logBuffer.push(`"processBatch()" - item.part_number=${item.part_number}`);
+    // logBuffer.push(`"processBatch()" - Processing part_number=${part_number}`);
+    // logBuffer.push(`"processBatch()" - currentIndex >= totalProductsInFile=${currentIndex >= totalProductsInFile}`);
 
     if (currentIndex >= totalProductsInFile) break;
       
@@ -430,10 +451,10 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
     try {
       // 1a) Attempt to find the matching product
-      const productId = await getProductIdByPartNumber(part_number, currentIndex, totalProductsInFile, fileKey);
+      const productId = await getProductIdByPartNumber(part_number, manufacturer, currentIndex, totalProductsInFile, fileKey);
 
-      //logInfoToFile(`"processBatch()" - For part_number=${part_number}, got productId=${productId}`);
-      logBuffer.push(`"processBatch()" - For part_number=${part_number}, got productId=${productId}`);
+      logInfoToFile(`"processBatch()" - For part_number=${part_number}, got productId=${productId}`);
+      //logBuffer.push(`"processBatch()" - For part_number=${part_number}, got productId=${productId}`);
 
       if (!productId) {
         recordMissingProduct(fileKey, item);  // Record missing product details
@@ -446,42 +467,59 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       const product = await getProductById(productId, fileKey, currentIndex);
       if (!product) {
         localFailCount++;
-        logErrorToFile(`"processBatch()" - Could not find part_number=${part_number}, marking as failed.`);
+        logErrorToFile(`❌ "processBatch()" - Could not find part_number=${part_number}, marking as failed.`);
         continue;
       }
+
+      // 🔎 Log the full WooCommerce product data before extracting part_number
+      logInfoToFile(`🔎 Full WooCommerce product data for productId=${productId}: ${JSON.stringify(product, null, 2)}`);
 
       const newData = createNewData(item, productId, part_number);
       const currentData = filterCurrentData(product);
 
       // ✅ Extract `part_number` from WooCommerce's meta_data field
-      let currentPartNumber = currentData.meta_data.find(meta => meta.key === "part_number")?.value?.trim() || "";
-      let currentManufacturer = currentData.meta_data.find(meta => meta.key === "manufacturer")?.value?.trim() || "";
+      let currentPartNumber = currentData.meta_data.find(meta => meta.key.toLowerCase() === "part_number")?.value?.trim() || "";
+      let currentManufacturer = currentData.meta_data.find(meta => meta.key.toLowerCase() === "manufacturer")?.value?.trim() || "";
+
+      logInfoToFile(`🔎 Extracted: currentPartNumber="${currentPartNumber}" | newData.part_number="${newData.part_number}"`);
+      logInfoToFile(`🔎 Extracted: currentManufacturer="${currentManufacturer}" | newData.manufacturer="${newData.manufacturer}"`);
       
       // ✅ If `part_number` is missing, use the product title as a fallback
       if (!currentPartNumber) {
-        currentPartNumber = currentData.name?.trim() || ""; 
-      }
+        if (currentData.name && typeof currentData.name === "string") {
+            currentPartNumber = currentData.name.trim();
+            logInfoToFile(`✅ Using product name as fallback part_number="${currentPartNumber}" for productId=${productId}`);
+        } else {
+            logErrorToFile(`❌ Fallback failed: Product name is missing or invalid for productId=${productId}`);
+        }
+    }
 
       // 🚀 Ensure both "part_number" and "manufacturer" match exactly
       if (newData.part_number !== currentPartNumber || manufacturer !== currentManufacturer) {
-        // logInfoToFile(`"processBatch()" - Skipping update: newData.part_number="${newData.part_number}" (CSV) does not match currentPartNumber="${currentPartNumber}" (WooCommerce) ` +
-        //   `OR newData.manufacturer="${manufacturer}" (CSV) does not match currentManufacturer="${currentManufacturer}" (WooCommerce)`);
-        logBuffer.push(`"processBatch()" - Skipping update: newData.part_number="${newData.part_number}" (CSV) does not match currentPartNumber="${currentPartNumber}" (WooCommerce) ` +
-          `OR newData.manufacturer="${manufacturer}" (CSV) does not match currentManufacturer="${currentManufacturer}" (WooCommerce)`);
+        logInfoToFile(`"processBatch()" - Skipping update: newData.part_number="${newData.part_number}" (CSV) does not match currentPartNumber="${currentPartNumber}" (WooCommerce) ` +
+           `OR newData.manufacturer="${manufacturer}" (CSV) does not match currentManufacturer="${currentManufacturer}" (WooCommerce)`);
+        //logBuffer.push(`"processBatch()" - Skipping update: newData.part_number="${newData.part_number}" (CSV) does not match currentPartNumber="${currentPartNumber}" (WooCommerce) ` +
+        //  `OR newData.manufacturer="${manufacturer}" (CSV) does not match currentManufacturer="${currentManufacturer}" (WooCommerce)`);
         skipCount++;
         continue;
       }
 
-      // logInfoToFile(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
-      // logInfoToFile(`"processBatch()" - Checking product data for part_number=${part_number}`);
-      logBuffer.push(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
-      logBuffer.push(`"processBatch()" - Checking product data for part_number=${part_number}`);
+      logInfoToFile(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
+      logInfoToFile(`"processBatch()" - Checking product data for part_number=${part_number}`);
+      // logBuffer.push(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
+      // logBuffer.push(`"processBatch()" - Checking product data for part_number=${part_number}`);
 
       // Check if any update is needed
-      if (!isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey)) {
-        skipCount++;
-        continue;
+      const updateNeeded = isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey);
+      logInfoToFile(`🔍 isUpdateNeeded() returned: ${updateNeeded} for Part Number: ${part_number}`);
+      if (!updateNeeded) {
+          skipCount++;
+          continue;
       }
+      // if (!isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey)) {
+      //   skipCount++;
+      //   continue;
+      // }
 
       const fieldsToUpdate = [];
       const changedFields = [];
@@ -494,15 +532,15 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
         // 🚀 Skip updating image_url if it contains "digikey.com"
         if (newMeta.key === "image_url" && newMetaValue.includes("digikey.com")) {
-          //logInfoToFile(`"processBatch()" - Skipping update for image_url as it contains "digikey.com"`);
-          logBuffer.push(`"processBatch()" - Skipping update for image_url as it contains "digikey.com"`);
+          logInfoToFile(`"processBatch()" - Skipping update for image_url as it contains "digikey.com"`);
+          //logBuffer.push(`"processBatch()" - Skipping update for image_url as it contains "digikey.com"`);
           return;
         }
 
         // 🚀 Skip updating datasheet_url if it contains "digikey.com"
         if ((newMeta.key === "datasheet_url" || newMeta.key === "datasheet") && newMetaValue.includes("digikey.com")) {
-          //logInfoToFile(`"processBatch()" - Skipping update for datasheet as it contains "digikey.com"`);
-          logBuffer.push(`"processBatch()" - Skipping update for datasheet as it contains "digikey.com"`);
+          logInfoToFile(`"processBatch()" - Skipping update for datasheet as it contains "digikey.com"`);
+          //logBuffer.push(`"processBatch()" - Skipping update for datasheet as it contains "digikey.com"`);
           return;
         }
 
@@ -516,10 +554,10 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         toUpdate.push({ id: productId, meta_data: fieldsToUpdate });
 
         // 🚀 Log only the fields that are different
-        // logInfoToFile(`Fields updated for part_number="${newData.part_number}":\n` +
-        // changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n"));
-        logBuffer.push(`Fields updated for part_number="${newData.part_number}":\n` +
+        logInfoToFile(`Fields updated for part_number="${newData.part_number}":\n` +
         changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n"));
+        // logBuffer.push(`Fields updated for part_number="${newData.part_number}":\n` +
+        // changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n"));
       } else {
         skipCount++;
       }
@@ -538,8 +576,8 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   // 2) If we have nothing to update, exit
   // ──────────────────────────────────────────────────────────
   if (toUpdate.length === 0) {
-    //logInfoToFile(`No valid products to update in this batch for ${fileKey}. Done.`);
-    logBuffer.push(`No valid products to update in this batch for ${fileKey}. Done.`);
+    logInfoToFile(`No valid products to update in this batch for ${fileKey}. Done.`);
+    //logBuffer.push(`No valid products to update in this batch for ${fileKey}. Done.`);
     return;
   }
 
@@ -556,8 +594,8 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         { id: jobId }
       );
       const apiCallEnd = performance.now();
-      //logInfoToFile(`WooCommerce API batch update took ${(apiCallEnd - apiCallStart).toFixed(2)} ms`);
-      logBuffer.push(`WooCommerce API batch update took ${(apiCallEnd - apiCallStart).toFixed(2)} ms`);
+      logInfoToFile(`WooCommerce API batch update took ${(apiCallEnd - apiCallStart).toFixed(2)} ms`);
+      //logBuffer.push(`WooCommerce API batch update took ${(apiCallEnd - apiCallStart).toFixed(2)} ms`);
 
       // 3a) Parse the response to see how many were updated
       //     Depending on your WooCommerce version, this might be in `response.data.update`.
@@ -607,17 +645,17 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         throw new Error(`Batch update failed permanently after ${MAX_RETRIES} attempts. fileKey=${fileKey}`);
       }
       const delayMs = Math.pow(2, attempts) * 1000;
-      //logInfoToFile(`Retrying after ${delayMs / 1000} seconds...`);
-      logBuffer.push(`Retrying after ${delayMs / 1000} seconds...`);
+      logInfoToFile(`Retrying after ${delayMs / 1000} seconds...`);
+      //logBuffer.push(`Retrying after ${delayMs / 1000} seconds...`);
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
 
   const batchEndTime = performance.now();
-  //logInfoToFile(`Total time for processBatch(fileKey=${fileKey}, startIndex=${startIndex}): ${(batchEndTime - batchStartTime).toFixed(2)} ms`);
-  logBuffer.push(`Total time for processBatch(fileKey=${fileKey}, startIndex=${startIndex}): ${(batchEndTime - batchStartTime).toFixed(2)} ms`);
+  logInfoToFile(`Total time for processBatch(fileKey=${fileKey}, startIndex=${startIndex}): ${(batchEndTime - batchStartTime).toFixed(2)} ms`);
+  //logBuffer.push(`Total time for processBatch(fileKey=${fileKey}, startIndex=${startIndex}): ${(batchEndTime - batchStartTime).toFixed(2)} ms`);
   
-  logInfoToFile(logBuffer.join("\n")); // ✅ Log once for the batch
+  //logInfoToFile(logBuffer.join("\n")); // ✅ Log once for the batch
 }
 
 module.exports = {
