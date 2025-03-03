@@ -43,6 +43,27 @@ function isMetaValueDifferent(newMetaValue, currentMetaValue) {
   return normalizeText(currentMetaValue) !== normalizeText(newMetaValue);
 }
 
+// ***************************************************************************
+// Helper - Record batch status to JSON file
+// ***************************************************************************
+const recordBatchStatus = (fileKey, updatedParts, skippedParts, failedParts) => {
+  const statusFilePath = path.join(__dirname, `batch_status_${fileKey.replace(/\.csv$/, "")}.json`);
+
+  // ✅ Construct JSON structure
+  const statusData = {
+      updated: updatedParts,
+      skipped: skippedParts,
+      failed: failedParts,
+  };
+
+  try {
+      fs.writeFileSync(statusFilePath, JSON.stringify(statusData, null, 2));
+      logInfoToFile(`✅ Saved batch status to ${statusFilePath}`);
+  } catch (err) {
+      logErrorToFile(`❌ Error writing batch status file: ${err.message}`);
+  }
+};
+
 // ***************************************************************************  
 // Helper - Check if product update is needed
 // ***************************************************************************
@@ -52,8 +73,8 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
   logInfoToFile(`"isUpdateNeeded()" - Checking for updates for Part Number: ${partNumber} in ${fileName}`);
 
   // 🔍 Debug current vs new data comparison
-  logInfoToFile(`🔎 currentData: ${JSON.stringify(currentData, null, 2)}`);
-  logInfoToFile(`🔎 newData: ${JSON.stringify(newData, null, 2)}`);
+  // logInfoToFile(`🔎 currentData: ${JSON.stringify(currentData, null, 2)}`);
+  // logInfoToFile(`🔎 newData: ${JSON.stringify(newData, null, 2)}`);
 
   Object.keys(newData).forEach((key) => {
     if (key === "id" || key === "part_number") return;
@@ -77,7 +98,7 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
 
         if (newMetaValue !== currentMetaValue) {
           fieldsToUpdate.push(`meta_data.${newMeta.key}`);
-          logInfoToFile(`✅ Update needed for key '${newMeta.key}': "${currentMetaValue}" → "${newMetaValue}"`);
+          logInfoToFile(`✅ Update needed for key '${newMeta.key}': "${currentMetaValue}" → "${newMetaValue}" for Part Number: ${partNumber} in ${fileName}`);
           //logBuffer.push(`✅ Update needed for key '${newMeta.key}': "${currentMetaValue}" → "${newMetaValue}"`);
         }
 
@@ -426,6 +447,10 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   let skipCount = 0;
   let localFailCount = 0;
 
+  const updatedParts = [];
+  const skippedParts = [];
+  const failedParts = [];
+
   for (let i = 0; i < batch.length; i++) {
     let item = batch[i];
     let part_number = item.part_number;
@@ -433,14 +458,11 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
     const currentIndex = startIndex + i;
     
-    logInfoToFile(`"processBatch()" - Processing item=${item}`);
-    logInfoToFile(`"processBatch()" - item.part_number=${item.part_number}`);
+    //logInfoToFile(`"processBatch()" - Processing item=${item}`);
+    //logInfoToFile(`"processBatch()" - item.part_number=${item.part_number}`);
     logInfoToFile(`"processBatch()" - Processing part_number=${part_number}`);
     logInfoToFile(`"processBatch()" - currentIndex >= totalProductsInFile=${currentIndex >= totalProductsInFile}`);
-    // logBuffer.push(`"processBatch()" - Processing item=${item}`);
-    // logBuffer.push(`"processBatch()" - item.part_number=${item.part_number}`);
-    // logBuffer.push(`"processBatch()" - Processing part_number=${part_number}`);
-    // logBuffer.push(`"processBatch()" - currentIndex >= totalProductsInFile=${currentIndex >= totalProductsInFile}`);
+
 
     if (currentIndex >= totalProductsInFile) break;
       
@@ -459,6 +481,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       if (!productId) {
         recordMissingProduct(fileKey, item);  // Record missing product details
         localFailCount++;
+        failedParts.push(`Row ${currentIndex + 1}: No product found for ${part_number}`);
         logErrorToFile(`"processBatch()" - Missing productId for part_number=${part_number}, marking as failed.`);
         continue;
       }
@@ -467,12 +490,13 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       const product = await getProductById(productId, fileKey, currentIndex);
       if (!product) {
         localFailCount++;
+        failedParts.push(`Row ${currentIndex + 1}: Product ID ${productId} not found`);
         logErrorToFile(`❌ "processBatch()" - Could not find part_number=${part_number}, marking as failed.`);
         continue;
       }
 
       // 🔎 Log the full WooCommerce product data before extracting part_number
-      logInfoToFile(`🔎 Full WooCommerce product data for productId=${productId}: ${JSON.stringify(product, null, 2)}`);
+      //logInfoToFile(`🔎 Full WooCommerce product data for productId=${productId}: ${JSON.stringify(product, null, 2)}`);
 
       const newData = createNewData(item, productId, part_number);
       const currentData = filterCurrentData(product);
@@ -501,19 +525,21 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         //logBuffer.push(`"processBatch()" - Skipping update: newData.part_number="${newData.part_number}" (CSV) does not match currentPartNumber="${currentPartNumber}" (WooCommerce) ` +
         //  `OR newData.manufacturer="${manufacturer}" (CSV) does not match currentManufacturer="${currentManufacturer}" (WooCommerce)`);
         skipCount++;
+        skippedParts.push(`Row ${currentIndex + 1}: ${part_number} skipped due to mismatched part_number or manufacturer`);
         continue;
       }
 
-      logInfoToFile(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
+      //logInfoToFile(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
       logInfoToFile(`"processBatch()" - Checking product data for part_number=${part_number}`);
       // logBuffer.push(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
       // logBuffer.push(`"processBatch()" - Checking product data for part_number=${part_number}`);
 
       // Check if any update is needed
       const updateNeeded = isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey);
-      logInfoToFile(`🔍 isUpdateNeeded() returned: ${updateNeeded} for Part Number: ${part_number}`);
+      //logInfoToFile(`🔍 isUpdateNeeded() returned: ${updateNeeded} for Part Number: ${part_number}`);
       if (!updateNeeded) {
           skipCount++;
+          skippedParts.push(`Row ${currentIndex + 1}: ${part_number} skipped (no changes)`);
           continue;
       }
       // if (!isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey)) {
@@ -563,8 +589,12 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       }
     } catch (err) {
       localFailCount++;
+      failedParts.push(`Row ${currentIndex + 1}: ${part_number} failed - ${err.message}`);
       logErrorToFile(`Error processing part_number=${part_number}: ${err.message}`, err.stack);
     }
+
+    // ✅ Write final status JSON file
+    recordBatchStatus(fileKey, updatedParts, skippedParts, failedParts);
 
   }
 
@@ -627,9 +657,10 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         //   }
 
         // 3b) Log each item that was "intended" to update
+        // ✅ Update this section where logging updates
         for (const product of toUpdate) {
-          logUpdatesToFile(`Updated part_number=${product.part_number} in file=${fileKey}`);
-          logUpdatesToFile(`Updated part_number=${part_number} in file=${fileKey}`);
+          const partNumber = batch.find(item => item.id === product.id)?.part_number || "Unknown"; 
+          logUpdatesToFile(`Updated part_number=${partNumber} in file=${fileKey}`);
         }
       }
 
@@ -645,7 +676,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         throw new Error(`Batch update failed permanently after ${MAX_RETRIES} attempts. fileKey=${fileKey}`);
       }
       const delayMs = Math.pow(2, attempts) * 1000;
-      logInfoToFile(`Retrying after ${delayMs / 1000} seconds...`);
+      logInfoToFile(`"processBatch()" - Retrying after ${delayMs / 1000} seconds...`);
       //logBuffer.push(`Retrying after ${delayMs / 1000} seconds...`);
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
