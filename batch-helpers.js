@@ -47,17 +47,43 @@ function isMetaValueDifferent(newMetaValue, currentMetaValue) {
 // Helper - Record batch status to JSON file
 // ***************************************************************************
 const recordBatchStatus = (fileKey, updatedParts, skippedParts, failedParts) => {
-  const statusFilePath = path.join(__dirname, `batch_status_${fileKey.replace(/\.csv$/, "")}.json`);
-
-  // ✅ Construct JSON structure
-  const statusData = {
-      updated: updatedParts,
-      skipped: skippedParts,
-      failed: failedParts,
-  };
-
   try {
-      fs.writeFileSync(statusFilePath, JSON.stringify(statusData, null, 2));
+      // ✅ Extract folder from fileKey (Ensure we create the full subfolder)
+      const statusDir = path.join(__dirname, "batch_status", fileKey.replace(/\.csv$/, ""));
+      
+      // ✅ Ensure the entire directory path exists
+      if (!fs.existsSync(statusDir)) {
+          fs.mkdirSync(statusDir, { recursive: true }); // Create full path recursively
+      }
+
+      // ✅ Define the file path inside the created subfolder
+      const statusFilePath = path.join(statusDir, `batch_status.json`);
+
+      // ✅ Initialize an empty batch status object
+      let batchStatus = { updated: [], skipped: [], failed: [] };
+
+      // ✅ If the file already exists, read its content and merge data
+      if (fs.existsSync(statusFilePath)) {
+          try {
+              const fileData = fs.readFileSync(statusFilePath, "utf-8");
+              batchStatus = JSON.parse(fileData);
+          } catch (error) {
+              logErrorToFile(`❌ Error reading batch status file: ${error.message}`);
+          }
+      }
+
+      // ✅ Append new part numbers to the respective lists
+      batchStatus.updated.push(...updatedParts);
+      batchStatus.skipped.push(...skippedParts);
+      batchStatus.failed.push(...failedParts);
+
+      // ✅ Remove duplicates (optional)
+      batchStatus.updated = [...new Set(batchStatus.updated)];
+      batchStatus.skipped = [...new Set(batchStatus.skipped)];
+      batchStatus.failed = [...new Set(batchStatus.failed)];
+
+      // ✅ Write the updated batch status back to the file
+      fs.writeFileSync(statusFilePath, JSON.stringify(batchStatus, null, 2));
       logInfoToFile(`✅ Saved batch status to ${statusFilePath}`);
   } catch (err) {
       logErrorToFile(`❌ Error writing batch status file: ${err.message}`);
@@ -426,8 +452,8 @@ const recordMissingProduct = (fileKey, item) => {
 // ***************************************************************************
 async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   const MAX_RETRIES = 5;
-  let attempts = 0;
   const action = "processBatch";
+  let attempts = 0;
 
   const batchStartTime = performance.now();
   //let logBuffer = [`Starting "processBatch()" for fileKey=${fileKey}, startIndex=${startIndex}`];
@@ -516,7 +542,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         } else {
             logErrorToFile(`❌ Fallback failed: Product name is missing or invalid for productId=${productId}`);
         }
-    }
+      }
 
       // 🚀 Ensure both "part_number" and "manufacturer" match exactly
       if (newData.part_number !== currentPartNumber || manufacturer !== currentManufacturer) {
@@ -577,11 +603,15 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       });
 
       if (fieldsToUpdate.length > 0) {
-        toUpdate.push({ id: productId, meta_data: fieldsToUpdate });
 
+        toUpdate.push({ id: productId, part_number, meta_data: fieldsToUpdate });
+        
         // 🚀 Log only the fields that are different
-        logInfoToFile(`Fields updated for part_number="${newData.part_number}":\n` +
-        changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n"));
+        //logInfoToFile(`"toUpdate" now is: ${JSON.stringify(toUpdate, null, 2)}`);
+        logInfoToFile(
+          `Fields updated for part_number="${newData.part_number}, id=${productId}":\n` +
+          changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n")
+        );
         // logBuffer.push(`Fields updated for part_number="${newData.part_number}":\n` +
         // changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n"));
       } else {
@@ -596,9 +626,11 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
     // ✅ Write final status JSON file
     recordBatchStatus(fileKey, updatedParts, skippedParts, failedParts);
 
-  }
+  } // End of for loop - looping through each item in the "batch"
 
+  // ──────────────────────────────────────────────────────────
   // 1c) Increment skip/fail counters in Redis
+  // ──────────────────────────────────────────────────────────
   if (skipCount > 0) await redisClient.incrBy(`skipped-products:${fileKey}`, skipCount);
   if (localFailCount > 0) await redisClient.incrBy(`failed-products:${fileKey}`, localFailCount);
 
@@ -628,7 +660,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       //logBuffer.push(`WooCommerce API batch update took ${(apiCallEnd - apiCallStart).toFixed(2)} ms`);
 
       // 3a) Parse the response to see how many were updated
-      //     Depending on your WooCommerce version, this might be in `response.data.update`.
+      //     Depending on the WooCommerce version, this might be in `response.data.update`.
       //     The official docs show something like { "update": [ {...}, {...} ] }, "create": [], "delete": [] }
       const data = response.data;
       if (!data || !data.update) {
@@ -651,21 +683,20 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
           await redisClient.incrBy(`updated-products:${fileKey}`, updatedCount);
         }
 
-        // If your store does partial success with an "errors" array:
+        // Partial success with an "errors" array:
         //   if (data.errors?.length) {
         //       await redisClient.incrBy(`failed-products:${fileKey}`, data.errors.length);
         //   }
 
         // 3b) Log each item that was "intended" to update
-        // ✅ Update this section where logging updates
         for (const product of toUpdate) {
-          const partNumber = batch.find(item => item.id === product.id)?.part_number || "Unknown"; 
-          logUpdatesToFile(`Updated part_number=${partNumber} in file=${fileKey}`);
+          logUpdatesToFile(`Updated part_number=${product.part_number} in file=${fileKey}`);
         }
       }
 
       // 3c) If we reach here, the call itself succeeded => break out of the retry loop
       return;
+
     } catch (err) {
       attempts++;
       logErrorToFile(`Batch update attempt ${attempts} for file="${fileKey}" failed: ${err.message}`);
@@ -680,7 +711,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       //logBuffer.push(`Retrying after ${delayMs / 1000} seconds...`);
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
-  }
+  } // End of while loop
 
   const batchEndTime = performance.now();
   logInfoToFile(`Total time for processBatch(fileKey=${fileKey}, startIndex=${startIndex}): ${(batchEndTime - batchStartTime).toFixed(2)} ms`);
