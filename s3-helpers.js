@@ -1,3 +1,4 @@
+const fs = require("fs");
 const { batchQueue } = require('./queue'); // Bull Queue instance
 const { S3Client, ListObjectsV2Command, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { promisify } = require("util");
@@ -7,7 +8,7 @@ const csvParser = require("csv-parser");
 const { logErrorToFile, logUpdatesToFile, logInfoToFile } = require("./logger");
 const { redisClient } = require('./queue');
 const { addBatchJob } = require('./job-manager');
-const { createUniqueJobId } = require('./utils');
+const { handleError, createUniqueJobId } = require('./utils');
 const { saveCheckpoint } = require('./checkpoint'); 
 
 const executionMode = process.env.EXECUTION_MODE || 'production';
@@ -73,7 +74,7 @@ const getLatestFolderKey = async (bucketName) => {
 
     return folders[0]; // Return the most recent folder
   } catch (error) {
-    logErrorToFile(`❌ Error in "getLatestFolderKey" function for bucket "${bucketName}": ${error.message}`, error.stack);
+    handleError(error, "getLatestFolderKey");
     return null;
   }
 };
@@ -139,17 +140,23 @@ const getTotalRowsFromS3 = async (bucketName, key) => {
 
 // ✅ **Check for Existing Jobs Across All States**
 const checkExistingJobs = async (fileKey) => {
-  const allJobs = await batchQueue.getJobs(["waiting", "active", "delayed", "completed", "failed"]);
-  
-  return allJobs.some(job => job.data.fileKey === fileKey);
+  const jobStates = ["waiting", "active", "delayed"];
+  const jobs = await batchQueue.getJobs(jobStates);
+
+  return jobs.some(job => job.data.fileKey === fileKey);
 };
 
 // ✅ **Check if File is Fully Processed**
 const isFileFullyProcessed = (fileKey) => {
-  const checkpointData = JSON.parse(fs.readFileSync("process_checkpoint.json", "utf-8") || "{}");
-  if (!checkpointData[fileKey]) return false;
+  // ✅ Ensure checkpoint file exists before reading
+  if (!fs.existsSync("process_checkpoint.json")) {
+    logInfoToFile(`⚠️ process_checkpoint.json not found. Creating a new one.`);
+    fs.writeFileSync("process_checkpoint.json", JSON.stringify({}, null, 2));
+    return false; // No checkpoints yet, so assume not processed
+  }
 
-  return checkpointData[fileKey].rowLevel.remainingRows === 0;
+  const checkpointData = JSON.parse(fs.readFileSync("process_checkpoint.json", "utf-8") || "{}");
+  return checkpointData[fileKey]?.rowLevel?.remainingRows === 0;
 };
 
 // ✅ **Read CSV from S3 and enqueue jobs**
@@ -361,7 +368,7 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
 
     logUpdatesToFile(`Completed reading the file: "${key}", total rows: ${totalRows}`);
   } catch (error) {
-    logErrorToFile(`Error in readCSVAndEnqueueJobs for file "${key}" in bucket "${bucketName}": ${error.message}, error`);
+    handleError(error, `readCSVAndEnqueueJobs for ${key}`);
     throw error; // Ensure any error bubbles up to be caught in Promise.all
   } 
 };

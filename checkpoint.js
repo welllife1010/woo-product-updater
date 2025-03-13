@@ -4,6 +4,12 @@ const { logErrorToFile, logInfoToFile } = require("./logger");
 const { batchQueue, redisClient } = require('./queue');
 const checkpointFilePath = path.join(__dirname, "process_checkpoint.json");
 
+// ✅ **Ensure `process_checkpoint.json` is always present at script start**
+if (!fs.existsSync(checkpointFilePath)) {
+  logInfoToFile(`⚠️ process_checkpoint.json not found. Creating a new one.`);
+  fs.writeFileSync(checkpointFilePath, JSON.stringify({}, null, 2)); // Create an empty JSON file
+}
+
 /**
  * Save progress / checkpoint to a local JSON file.
  *
@@ -25,10 +31,16 @@ async function saveCheckpoint(fileKey, lastProcessedRow, totalRows) {
       logErrorToFile(`❌ saveCheckpoint received invalid lastProcessedRow: ${lastProcessedRow}`);
       return;
     }
+
+    // ✅ Ensure the checkpoint file exists before writing
+    if (!fs.existsSync(checkpointFilePath)) {
+      logInfoToFile(`⚠️ process_checkpoint.json not found. Creating a new one.`);
+      fs.writeFileSync(checkpointFilePath, JSON.stringify({}, null, 2));
+    }
   
     // ──────────────────────────────────────────────
     // 1) Fetch Row-Level Stats (Optional)
-    //    If you still use Redis to track updated/skipped/failed, you can keep it
+    //    Use Redis to track updated/skipped/failed products.
     // ──────────────────────────────────────────────
     const updated = parseInt(await redisClient.get(`updated-products:${fileKey}`) || 0, 10);
     const skipped = parseInt(await redisClient.get(`skipped-products:${fileKey}`) || 0, 10);
@@ -39,7 +51,7 @@ async function saveCheckpoint(fileKey, lastProcessedRow, totalRows) {
   
     // ──────────────────────────────────────────────
     // 2) (Optional) Gather Queue-Wide Job Stats
-    //    Even with 1 worker, you can store how many jobs are left.
+    //    Even with 1 worker, we can store how many jobs are left.
     // ──────────────────────────────────────────────
     const waiting = await batchQueue.getWaitingCount();
     const active  = await batchQueue.getActiveCount();
@@ -50,15 +62,13 @@ async function saveCheckpoint(fileKey, lastProcessedRow, totalRows) {
     // 3) Read Existing Checkpoint Data From JSON
     // ──────────────────────────────────────────────
     let checkpoints = {};
-    if (fs.existsSync(checkpointFilePath)) {
-      try {
-        const fileData = fs.readFileSync(checkpointFilePath, "utf-8");
-        checkpoints = JSON.parse(fileData);
-      } catch (error) {
-        logErrorToFile(`❌ Error reading checkpoint file: ${error.message}`);
-        // If parse fails, we fallback to an empty object
-        checkpoints = {};
-      }
+    try {
+      const fileData = fs.readFileSync(checkpointFilePath, "utf-8");
+      checkpoints = JSON.parse(fileData);
+    } catch (error) {
+      logErrorToFile(`❌ Error reading checkpoint file: ${error.message}`);
+      // If parse fails, we fallback to an empty object
+      checkpoints = {};
     }
     // ──────────────────────────────────────────────
     // 4) Update the Checkpoints Object
@@ -98,7 +108,7 @@ async function saveCheckpoint(fileKey, lastProcessedRow, totalRows) {
 }
 
 /**
- * getLastProcessedRow returns the lastProcessedRow stored in process_checkpoint.json.
+ * getLastProcessedRow returns the lastProcessedRow stored in `process_checkpoint.json`.
  */
 function getLastProcessedRow(fileKey) {
 
@@ -109,9 +119,11 @@ function getLastProcessedRow(fileKey) {
       return 0;
     }
   
+    // ✅ Ensure the checkpoint file exists
     if (!fs.existsSync(checkpointFilePath)) {
-      logInfoToFile(`Checkpoint file doesn't exist yet. Returning 0 for fileKey=${fileKey}`);
-      return 0;
+      logInfoToFile(`⚠️ process_checkpoint.json not found. Creating a new one.`);
+      fs.writeFileSync(checkpointFilePath, JSON.stringify({}, null, 2));
+      return 0; // No previous progress
     }
   
     try {
