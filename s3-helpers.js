@@ -13,10 +13,12 @@ const { saveCheckpoint } = require('./checkpoint');
 const executionMode = process.env.EXECUTION_MODE || 'production';
 
 const initializeFileTracking = async (fileKey, totalRows) => {
-  await redisClient.set(`total-rows:${fileKey}`, totalRows);
-  await redisClient.set(`updated-products:${fileKey}`, 0);  
-  await redisClient.set(`skipped-products:${fileKey}`, 0);  
-  await redisClient.set(`failed-products:${fileKey}`, 0);   
+  await redisClient.mSet({
+    [`total-rows:${fileKey}`]: totalRows,
+    [`updated-products:${fileKey}`]: 0,
+    [`skipped-products:${fileKey}`]: 0,
+    [`failed-products:${fileKey}`]: 0,
+  });
 };
 
 // AWS S3 setup (using AWS SDK v3)
@@ -135,22 +137,46 @@ const getTotalRowsFromS3 = async (bucketName, key) => {
   }
 };
 
-// Read CSV from S3 and enqueue jobs
+// ✅ **Check for Existing Jobs Across All States**
+const checkExistingJobs = async (fileKey) => {
+  const allJobs = await batchQueue.getJobs(["waiting", "active", "delayed", "completed", "failed"]);
+  
+  return allJobs.some(job => job.data.fileKey === fileKey);
+};
+
+// ✅ **Check if File is Fully Processed**
+const isFileFullyProcessed = (fileKey) => {
+  const checkpointData = JSON.parse(fs.readFileSync("process_checkpoint.json", "utf-8") || "{}");
+  if (!checkpointData[fileKey]) return false;
+
+  return checkpointData[fileKey].rowLevel.remainingRows === 0;
+};
+
+// ✅ **Read CSV from S3 and enqueue jobs**
 const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
   let totalRows = await getTotalRowsFromS3(bucketName, key);
-  // if (totalRows <= 0) {
-  //     logErrorToFile(`❌ Invalid totalRows (${totalRows}) for ${key}. Skipping processing.`);
-  //     return;
-  // }
+
   if (totalRows === null) {
     logErrorToFile(`❌ Skipping ${key} due to S3 read error.`);
     return;
   }
 
-   // ✅ Initialize tracking for this file in Redis
-   await initializeFileTracking(key, totalRows);
+  // ✅ Check if the file has already been processed or exists in Redis
+  const alreadyInQueue = await checkExistingJobs(key);
+  if (alreadyInQueue) {
+    logInfoToFile(`⚠️ Skipping job for ${key}, already in the queue.`);
+    return;
+  }
 
-   logInfoToFile(`🚀 Processing file: ${key} | Total Rows: ${totalRows} | Checkpoints set up in Redis`);
+  // ✅ Check if the file is already fully processed
+  if (isFileFullyProcessed(key)) {
+    logInfoToFile(`✅ Skipping ${key}, already fully processed.`);
+    return;
+  }
+
+  // ✅ Initialize tracking for this file in Redis
+  await initializeFileTracking(key, totalRows);
+  logInfoToFile(`🚀 Processing file: ${key} | Total Rows: ${totalRows} | Checkpoints set up in Redis`);
   
   // ✅ **Check for Duplicate Jobs Across All States**
   const allExistingJobs = await batchQueue.getJobs(["waiting", "active", "delayed", "completed", "failed"]);
