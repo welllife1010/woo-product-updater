@@ -94,13 +94,26 @@ const recordBatchStatus = (fileKey, updatedParts, skippedParts, failedParts) => 
 // Helper - Check if product update is needed
 // ***************************************************************************
 const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile, partNumber, fileName) => {
+  const updateMode = process.env.UPDATE_MODE || 'full'; // Default to full mode
   const fieldsToUpdate = [];
-  //let logBuffer = [`"isUpdateNeeded()" - Checking updates for Part Number: ${partNumber} in ${fileName}`];
   logInfoToFile(`"isUpdateNeeded()" - Checking for updates for Part Number: ${partNumber} in ${fileName}`);
 
   // 🔍 Debug current vs new data comparison
   // logInfoToFile(`🔎 currentData: ${JSON.stringify(currentData, null, 2)}`);
   // logInfoToFile(`🔎 newData: ${JSON.stringify(newData, null, 2)}`);
+
+  if (updateMode === "quantity") {
+    const currentQuantity = currentData.meta_data?.find(meta => meta.key === "quantity")?.value || "0";
+    const newQuantity = newData.meta_data?.find(meta => meta.key === "quantity")?.value || "0";
+
+    if (currentQuantity !== newQuantity) {
+        logInfoToFile(`✅ Quantity update needed for Part Number: ${partNumber}: "${currentQuantity}" → "${newQuantity}"`);
+        return true;
+    }
+
+    logInfoToFile(`No quantity update needed for Part Number: ${partNumber}`);
+    return false;
+  }
 
   Object.keys(newData).forEach((key) => {
     if (key === "id" || key === "part_number") return;
@@ -111,8 +124,6 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
     // Handle meta_data (custom fields) specifically, as it is an array of objects
     if (key === "meta_data") {
       if (!Array.isArray(newValue) || !Array.isArray(currentValue)) {
-          //logger.info(`DEBUG: meta_data is not an array in either current or new data for Part Number: ${partNumber} in ${fileName}.`);
-          //logBuffer.push(`meta_data is not an array for ${partNumber}. Marking for update.`);
           fieldsToUpdate.push(key);
           return true;
       }
@@ -124,8 +135,6 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
 
         if (newMetaValue !== currentMetaValue) {
           fieldsToUpdate.push(`meta_data.${newMeta.key}`);
-          logInfoToFile(`✅ Update needed for key '${newMeta.key}': "${currentMetaValue}" → "${newMetaValue}" for Part Number: ${partNumber} in ${fileName}`);
-          //logBuffer.push(`✅ Update needed for key '${newMeta.key}': "${currentMetaValue}" → "${newMetaValue}"`);
         }
 
         // Special check for datasheet fields
@@ -133,13 +142,11 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
           // If the new datasheet value contains "digikey", skip updating this field.
           if (newMetaValue.toLowerCase().includes("digikey")) {
             logInfoToFile(`Skipping update for ${newMeta.key} because new value contains "digikey"`);
-            //logBuffer.push(`Skipping update for ${newMeta.key} because new value contains "digikey"`);
             return;
           }
           // If the current datasheet value already contains "suntsu-products-s3-bucket", skip updating. Ensure update only happens if current value is different
           if (currentMetaValue && currentMetaValue.toLowerCase().includes("suntsu-products-s3-bucket") && currentMetaValue !== newMetaValue) {
             logInfoToFile(`Skipping update for ${newMeta.key} because current value contains "suntsu-products-s3-bucket"`);
-            //logBuffer.push(`Skipping update for ${newMeta.key} because current value contains "suntsu-products-s3-bucket"`);
             return;
           }
         }
@@ -147,14 +154,12 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
         // **🚀 Special check for Image_Url containing "digikey.com"**
         if (newMeta.key === "image_url" && (newMetaValue.includes("digikey.com") || newMetaValue.includes("mm.digikey.com"))) {
           logInfoToFile(`⚠️ Skipping update for image_url as it contains "digikey.com"`);
-          //logBuffer.push(`⚠️ Skipping update for image_url as it contains "digikey.com"`);
           return; // **Skip updating this field**
         }
     
         // Check if the current meta is missing or if values differ
         if (isCurrentMetaMissing(newMetaValue, currentMeta)) {
             logInfoToFile(`DEBUG: Key '${newMeta.key}' missing in currentData (old) meta_data for Part Number: ${partNumber} in file ${fileName}. Marking for update. \n`);
-            //logBuffer.push(`DEBUG: Key '${newMeta.key}' missing in currentData (old) meta_data for Part Number: ${partNumber} in file ${fileName}. Marking for update. \n`);
             fieldsToUpdate.push(`meta_data.${newMeta.key}`);
             return true;
         }
@@ -162,7 +167,6 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
         if (isMetaValueDifferent(newMetaValue, currentMetaValue)) {
             fieldsToUpdate.push(`meta_data.${newMeta.key}`);
             logInfoToFile(`Update needed for key '${newMeta.key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentMetaValue}', \nNew value: '${newMetaValue}' \n`);
-            // logBuffer.push(`Update needed for key '${newMeta.key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentMetaValue}', \nNew value: '${newMetaValue}' \n`);
         }
       })
     } else {
@@ -176,7 +180,6 @@ const isUpdateNeeded = (currentData, newData, currentIndex, totalProductsInFile,
       if (currentValue === undefined || currentValue !== newValue) {
           fieldsToUpdate.push(key);
           logInfoToFile(`Update needed for key '${key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentValue}', \nNew value: '${newValue}' \n`);
-          // logBuffer.push(`Update needed for key '${key}' for Part Number: ${partNumber} in ${fileName}. \nCurrent value: '${currentValue}', \nNew value: '${newValue}' \n`);
       }
     }
   });
@@ -274,9 +277,21 @@ const formatAcfFieldName = (name) => {
  * ```
  */
 const createNewData = (item, productId, part_number) => {
+  const updateMode = process.env.UPDATE_MODE || 'full';
   const normalizedCsvRow = normalizeCsvHeaders(item);
   let additionalInfo = [];
 
+  if (updateMode === "quantity") {
+    return {
+        id: productId,
+        part_number: normalizedCsvRow.part_number || part_number,
+        meta_data: [
+            { key: "quantity", value: normalizedCsvRow.quantity_available || "0" }
+        ],
+    };
+  }
+
+  // Full mode: Include all fields
   // Define mapping of CSV headers to WooCommerce meta_data fields
   const metaDataKeyMap = {
     manufacturer: "manufacturer",
@@ -352,6 +367,7 @@ const createNewData = (item, productId, part_number) => {
       { key: "additional_key_information", value: additionalInfo || "" },
     ],
   };
+
 };
 
 /**
@@ -451,6 +467,7 @@ const recordMissingProduct = (fileKey, item) => {
 // Example: parse partial updates from the response
 // ***************************************************************************
 async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
+  const updateMode = process.env.UPDATE_MODE || 'full';
   const MAX_RETRIES = 5;
   const action = "processBatch";
   let attempts = 0;
@@ -484,14 +501,10 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
     const currentIndex = startIndex + i;
     
-    //logInfoToFile(`"processBatch()" - Processing item=${item}`);
-    //logInfoToFile(`"processBatch()" - item.part_number=${item.part_number}`);
     logInfoToFile(`"processBatch()" - Processing part_number=${part_number}`);
     logInfoToFile(`"processBatch()" - currentIndex >= totalProductsInFile=${currentIndex >= totalProductsInFile}`);
 
-
     if (currentIndex >= totalProductsInFile) break;
-      
     if (!part_number) {
       localFailCount++;
       continue;
@@ -500,10 +513,6 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
     try {
       // 1a) Attempt to find the matching product
       const productId = await getProductIdByPartNumber(part_number, manufacturer, currentIndex, totalProductsInFile, fileKey);
-
-      logInfoToFile(`"processBatch()" - For part_number=${part_number}, got productId=${productId}`);
-      //logBuffer.push(`"processBatch()" - For part_number=${part_number}, got productId=${productId}`);
-
       if (!productId) {
         recordMissingProduct(fileKey, item);  // Record missing product details
         localFailCount++;
@@ -555,26 +564,28 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         continue;
       }
 
-      //logInfoToFile(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
       logInfoToFile(`"processBatch()" - Checking product data for part_number=${part_number}`);
-      // logBuffer.push(`"processBatch()" - product: ${product} | \n\nnewData: ${JSON.stringify(newData)} | \n\ncurrentData: ${JSON.stringify(currentData)}`);
-      // logBuffer.push(`"processBatch()" - Checking product data for part_number=${part_number}`);
 
-      // Check if any update is needed
+      // ** Check if any update is needed **
+      // 🚀 Use the isUpdateNeeded function to compare currentData and newData
       const updateNeeded = isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey);
-      //logInfoToFile(`🔍 isUpdateNeeded() returned: ${updateNeeded} for Part Number: ${part_number}`);
       if (!updateNeeded) {
           skipCount++;
           skippedParts.push(`Row ${currentIndex + 1}: ${part_number} skipped (no changes)`);
           continue;
       }
-      // if (!isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey)) {
-      //   skipCount++;
-      //   continue;
-      // }
 
       const fieldsToUpdate = [];
       const changedFields = [];
+
+      if (updateMode === "quantity") {
+
+        
+
+      } else if (updateMode === "full") {
+
+      }
+
       
       // Iterate over meta_data and only add changed fields
       newData.meta_data.forEach(newMeta => {
@@ -607,7 +618,6 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         toUpdate.push({ id: productId, part_number, meta_data: fieldsToUpdate });
         
         // 🚀 Log only the fields that are different
-        //logInfoToFile(`"toUpdate" now is: ${JSON.stringify(toUpdate, null, 2)}`);
         logInfoToFile(
           `Fields updated for part_number="${newData.part_number}, id=${productId}":\n` +
           changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n")
