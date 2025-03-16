@@ -134,28 +134,30 @@ const processCSVFilesInS3LatestFolder = async (bucketName, batchSize) => {
 const getTotalRowsFromS3 = async (bucketName, key) => {
   try {
 
-      const data = await s3Client.send(new GetObjectCommand({ Bucket: bucketName, Key: key }));
-      // ✅ Check if data and Body are valid
-      if (!data || !data.Body) {
-        logErrorToFile(`❌ Debug: getTotalRowsFromS3 - No data or Body received for file ${key}`);
-        return 0;
-      }
+    logInfoToFile(`🚀 Debug: getTotalRowsFromS3 called with bucketName=${bucketName}, key=${key}`);
 
-      const bodyContent = await data.Body.transformToString();
-      // ✅ Check if bodyContent is a valid string
-      if (!bodyContent) {
-        logErrorToFile(`❌ Debug: getTotalRowsFromS3 - Empty content received for file ${key}`);
-        return 0;
-      }
+    const data = await s3Client.send(new GetObjectCommand({ Bucket: bucketName, Key: key }));
+    // ✅ Check if data and Body are valid
+    if (!data || !data.Body) {
+      logErrorToFile(`❌ Debug: getTotalRowsFromS3 - No data or Body received for file ${key}`);
+      return 0;
+    }
 
-      const rows = bodyContent.split('\n').filter(row => row.trim() !== ''); // Remove empty lines
-      const totalRows = rows.length - 1; // Exclude header row
+    const bodyContent = await data.Body.transformToString();
+    // ✅ Check if bodyContent is a valid string
+    if (!bodyContent) {
+      logErrorToFile(`❌ Debug: getTotalRowsFromS3 - Empty content received for file ${key}`);
+      return 0;
+    }
 
-      // Ensure totalRows is an integer
-      if (!Number.isInteger(totalRows) || totalRows < 0) {
-        logErrorToFile(`❌ Invalid totalRows detected in getTotalRowsFromS3 for ${key}: ${JSON.stringify(totalRows)}`);
-        return 0;
-      }
+    const rows = bodyContent.split('\n').filter(row => row.trim() !== ''); // Remove empty lines
+    const totalRows = rows.length - 1; // Exclude header row
+
+    // Ensure totalRows is an integer
+    if (!Number.isInteger(totalRows) || totalRows < 0) {
+      logErrorToFile(`❌ Invalid totalRows detected in getTotalRowsFromS3 for ${key}: ${JSON.stringify(totalRows)}`);
+      return 0;
+    }
 
     logInfoToFile(`✅ getTotalRowsFromS3: File ${key} has ${totalRows} rows.`);
     return totalRows;
@@ -196,7 +198,7 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
 
   logInfoToFile(`🚀 Debug: 'readCSVAndEnqueueJobs()' - 'getTotalRowsFromS3()' Total rows fetched from S3 for ${key}: ${totalRows}`);
 
-  if (totalRows === null) {
+  if (totalRows === null || totalRows <= 0) {
     logErrorToFile(`❌ Skipping ${key} due to S3 read error.`);
     return;
   }
@@ -436,9 +438,6 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
     } catch (error) {
         logErrorToFile(`❌ Unexpected error: ${error.message}`, error.stack);
     }
-    // handleError(error, `readCSVAndEnqueueJobs for ${key}`);
-    // logErrorToFile(`🛑 Debug: Invalid argument received in readCSVAndEnqueueJobs: ${JSON.stringify(error)}`);
-    // throw error; // Ensure any error bubbles up to be caught in Promise.all
   } 
 };
 

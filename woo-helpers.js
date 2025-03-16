@@ -101,8 +101,8 @@ const getProductById = async (productId, fileKey, currentIndex) => {
   
 // Find product ID by custom field "part_number"
 const getProductIdByPartNumber = async (partNumber, manufacturer, currentIndex, totalProducts, fileKey) => {
-    let attempts = 0;
     const action = 'getProductIdByPartNumber';
+    let attempts = 0;
     let page = 1; // Start pagination
     let perPage = 5; // ✅ Fetch 5 products at a time
     let maxPages = 5; // ✅ Limit search to 5 pages

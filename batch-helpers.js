@@ -285,14 +285,14 @@ const createNewData = (item, productId, part_number) => {
     return {
         id: productId,
         part_number: normalizedCsvRow.part_number || part_number,
+        manufacturer: normalizedCsvRow.manufacturer || "", 
         meta_data: [
             { key: "quantity", value: normalizedCsvRow.quantity_available || "0" }
         ],
     };
   }
 
-  // Full mode: Include all fields
-  // Define mapping of CSV headers to WooCommerce meta_data fields
+  // Full mode: Include all fields - Define mapping of CSV headers to WooCommerce meta_data fields
   const metaDataKeyMap = {
     manufacturer: "manufacturer",
     leadtime: "manufacturer_lead_weeks",
@@ -498,7 +498,6 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
     let item = batch[i];
     let part_number = item.part_number;
     let manufacturer = item.manufacturer?.trim() || "";
-
     const currentIndex = startIndex + i;
     
     logInfoToFile(`"processBatch()" - Processing part_number=${part_number}`);
@@ -529,9 +528,6 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         logErrorToFile(`❌ "processBatch()" - Could not find part_number=${part_number}, marking as failed.`);
         continue;
       }
-
-      // 🔎 Log the full WooCommerce product data before extracting part_number
-      //logInfoToFile(`🔎 Full WooCommerce product data for productId=${productId}: ${JSON.stringify(product, null, 2)}`);
 
       const newData = createNewData(item, productId, part_number);
       const currentData = filterCurrentData(product);
@@ -566,66 +562,75 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
       logInfoToFile(`"processBatch()" - Checking product data for part_number=${part_number}`);
 
-      // ** Check if any update is needed **
-      // 🚀 Use the isUpdateNeeded function to compare currentData and newData
-      const updateNeeded = isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey);
-      if (!updateNeeded) {
-          skipCount++;
-          skippedParts.push(`Row ${currentIndex + 1}: ${part_number} skipped (no changes)`);
-          continue;
-      }
-
-      const fieldsToUpdate = [];
-      const changedFields = [];
-
       if (updateMode === "quantity") {
 
-        
+        const currentQuantity = currentData.meta_data.find(meta => meta.key === "quantity")?.value || "0";
+        const newQuantity = newData.meta_data.find(meta => meta.key === "quantity")?.value || "0";
 
-      } else if (updateMode === "full") {
-
-      }
-
-      
-      // Iterate over meta_data and only add changed fields
-      newData.meta_data.forEach(newMeta => {
-        const currentMeta = currentData.meta_data.find(meta => meta.key === newMeta.key);
-        const currentMetaValue = currentMeta?.value || "";
-        const newMetaValue = newMeta.value;
-
-        // 🚀 Skip updating image_url if it contains "digikey.com"
-        if (newMeta.key === "image_url" && newMetaValue.includes("digikey.com")) {
-          logInfoToFile(`"processBatch()" - Skipping update for image_url as it contains "digikey.com"`);
-          //logBuffer.push(`"processBatch()" - Skipping update for image_url as it contains "digikey.com"`);
-          return;
+        if (currentQuantity === newQuantity) {
+          skipCount++;
+          continue;
         }
 
-        // 🚀 Skip updating datasheet_url if it contains "digikey.com"
-        if ((newMeta.key === "datasheet_url" || newMeta.key === "datasheet") && newMetaValue.includes("digikey.com")) {
-          logInfoToFile(`"processBatch()" - Skipping update for datasheet as it contains "digikey.com"`);
-          //logBuffer.push(`"processBatch()" - Skipping update for datasheet as it contains "digikey.com"`);
-          return;
-        }
+        toUpdate.push({
+          id: productId,
+          manufacturer,
+          meta_data: [{ key: "quantity", value: String(newQuantity) }]
+        });
 
-        if (isCurrentMetaMissing(newMetaValue, currentMeta) || isMetaValueDifferent(newMetaValue, currentMetaValue)) {
-          fieldsToUpdate.push(newMeta);
-          changedFields.push({ key: newMeta.key, oldValue: currentMetaValue, newValue: newMetaValue });
-        }
-      });
-
-      if (fieldsToUpdate.length > 0) {
-
-        toUpdate.push({ id: productId, part_number, meta_data: fieldsToUpdate });
-        
-        // 🚀 Log only the fields that are different
-        logInfoToFile(
-          `Fields updated for part_number="${newData.part_number}, id=${productId}":\n` +
-          changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n")
-        );
-        // logBuffer.push(`Fields updated for part_number="${newData.part_number}":\n` +
-        // changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n"));
       } else {
-        skipCount++;
+        // ** Check if any update is needed **
+        // 🚀 Use the isUpdateNeeded function to compare currentData and newData
+        const updateNeeded = isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey);
+        if (!updateNeeded) {
+            skipCount++;
+            skippedParts.push(`Row ${currentIndex + 1}: ${part_number} skipped (no changes)`);
+            continue;
+        }
+
+        const fieldsToUpdate = [];
+        const changedFields = [];
+
+        // Iterate over meta_data and only add changed fields
+        newData.meta_data.forEach(newMeta => {
+          const currentMeta = currentData.meta_data.find(meta => meta.key === newMeta.key);
+          const currentMetaValue = currentMeta?.value || "";
+          const newMetaValue = newMeta.value;
+
+          // 🚀 Skip updating image_url if it contains "digikey.com"
+          if (newMeta.key === "image_url" && newMetaValue.includes("digikey.com")) {
+            logInfoToFile(`"processBatch()" - Skipping update for image_url as it contains "digikey.com"`);
+            //logBuffer.push(`"processBatch()" - Skipping update for image_url as it contains "digikey.com"`);
+            return;
+          }
+
+          // 🚀 Skip updating datasheet_url if it contains "digikey.com"
+          if ((newMeta.key === "datasheet_url" || newMeta.key === "datasheet") && newMetaValue.includes("digikey.com")) {
+            logInfoToFile(`"processBatch()" - Skipping update for datasheet as it contains "digikey.com"`);
+            //logBuffer.push(`"processBatch()" - Skipping update for datasheet as it contains "digikey.com"`);
+            return;
+          }
+
+          if (isCurrentMetaMissing(newMetaValue, currentMeta) || isMetaValueDifferent(newMetaValue, currentMetaValue)) {
+            fieldsToUpdate.push(newMeta);
+            changedFields.push({ key: newMeta.key, oldValue: currentMetaValue, newValue: newMetaValue });
+          }
+        });
+
+        if (fieldsToUpdate.length > 0) {
+
+          toUpdate.push({ id: productId, part_number, meta_data: fieldsToUpdate });
+          
+          // 🚀 Log only the fields that are different
+          logInfoToFile(
+            `Fields updated for part_number="${newData.part_number}, id=${productId}":\n` +
+            changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n")
+          );
+          // logBuffer.push(`Fields updated for part_number="${newData.part_number}":\n` +
+          // changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n"));
+        } else {
+          skipCount++;
+        }
       }
     } catch (err) {
       localFailCount++;
