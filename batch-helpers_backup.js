@@ -461,96 +461,6 @@ const recordMissingProduct = (fileKey, item) => {
   logInfoToFile(`Recorded missing product for part_number=${item.part_number} in file ${missingFilePath}`);
 };
 
-// 1️⃣ fetchProductData() → Fetch productId & existing WooCommerce data
-async function fetchProductData(item, currentIndex, totalProductsInFile, fileKey) {
-  const productId = await getProductIdByPartNumber(item.part_number, item.manufacturer?.trim() || "", currentIndex, totalProductsInFile, fileKey);
-  if (!productId) {
-      recordMissingProduct(fileKey, item);
-      logErrorToFile(`"processBatch()" - Missing productId for part_number=${item.part_number}, marking as failed.`);
-      return { productId: null, currentData: null };
-  }
-
-  const currentData = await getProductById(productId, fileKey, currentIndex);
-  if (!currentData) {
-      logErrorToFile(`❌ "processBatch()" - Could not find part_number=${item.part_number}, marking as failed.`);
-      return { productId: null, currentData: null };
-  }
-
-  return { productId, currentData };
-}
-
-// 2️⃣ validateProductMatch() → Ensure the correct product is being updated
-function validateProductMatch(item, currentData, productId, fileKey) {
-  let currentPartNumber = currentData.meta_data.find(meta => meta.key.toLowerCase() === "part_number")?.value?.trim() || "";
-  let currentManufacturer = currentData.meta_data.find(meta => meta.key.toLowerCase() === "manufacturer")?.value?.trim() || "";
-
-  if (!currentPartNumber) {
-      currentPartNumber = currentData.name?.trim() || "";
-  }
-
-  if (item.part_number !== currentPartNumber || item.manufacturer !== currentManufacturer) {
-      logInfoToFile(`"processBatch()" - Skipping update for part_number=${item.part_number}: WooCommerce data mismatch.`);
-      return false;
-  }
-
-  return true;
-}
-
-// 3️⃣ handleQuantityUpdate() → Process only quantity updates
-function handleQuantityUpdate(newData, currentData, toUpdate, productId, item) {
-  const currentQuantity = currentData.meta_data.find(meta => meta.key === "quantity")?.value || "0";
-  const newQuantity = newData.meta_data.find(meta => meta.key === "quantity")?.value || "0";
-
-  if (currentQuantity === newQuantity) {
-      logInfoToFile(`🔎 Skipping update for part_number=${item.part_number} as quantity is unchanged: ${currentQuantity}`);
-      return false;
-  }
-
-  toUpdate.push({
-      id: productId,
-      manufacturer: item.manufacturer,
-      meta_data: [{ key: "quantity", value: String(newQuantity) }]
-  });
-
-  return true;
-}
-
-// 4️⃣ handleFullUpdate() → Process full product updates
-function handleFullUpdate(newData, currentData, toUpdate, productId, item) {
-  if (!isUpdateNeeded(currentData, newData)) {
-      logInfoToFile(`Skipping update for part_number=${item.part_number} (no changes detected).`);
-      return false;
-  }
-
-  toUpdate.push(newData);
-  return true;
-}
-
-// 5️⃣ executeBatchUpdate() → Send bulk updates to WooCommerce
-async function executeBatchUpdate(toUpdate, fileKey, MAX_RETRIES) {
-  if (toUpdate.length === 0) {
-      logInfoToFile(`No valid products to update in this batch for ${fileKey}. Done.`);
-      return;
-  }
-
-  let attempts = 0;
-  while (attempts < MAX_RETRIES) {
-      try {
-          const jobId = createUniqueJobId(fileKey, "processBatch", 0, attempts);
-          const response = await scheduleApiRequest(() => wooApi.put("products/batch", { update: toUpdate }), { id: jobId });
-
-          const updatedCount = response.data?.update?.length || 0;
-          await redisClient.incrBy(`updated-products:${fileKey}`, updatedCount);
-          return;
-      } catch (err) {
-          attempts++;
-          logErrorToFile(`Batch update attempt ${attempts} for file="${fileKey}" failed: ${err.message}`);
-          if (attempts >= MAX_RETRIES) throw new Error(`Batch update failed permanently after ${MAX_RETRIES} attempts.`);
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempts) * 1000));
-      }
-  }
-}
-
 // ***************************************************************************
 // Main Function - processBatch()
 // Process a batch of products using WooCommerce Bulk API
@@ -559,74 +469,270 @@ async function executeBatchUpdate(toUpdate, fileKey, MAX_RETRIES) {
 async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   const updateMode = process.env.UPDATE_MODE || 'full';
   const MAX_RETRIES = 5;
+  const action = "processBatch";
   let attempts = 0;
 
-  logInfoToFile(`Starting "processBatch()" with startIndex=${startIndex}, fileKey=${fileKey}, Mode: ${updateMode}`);
+  const batchStartTime = performance.now();
+  //let logBuffer = [`Starting "processBatch()" for fileKey=${fileKey}, startIndex=${startIndex}`];
+  logInfoToFile(`Starting "processBatch()" with startIndex=${startIndex}, fileKey=${fileKey}`);
 
   if (!Array.isArray(batch)) {
-      throw new Error(`"processBatch()" - Expected batch to be an array, got ${typeof batch}`);
+    throw new Error(`"processBatch()" - Expected batch to be an array, got ${typeof batch}`);
   }
 
+  logInfoToFile(`"processBatch()" - Processing batch of ${batch.length} items for fileKey=${fileKey}`);
+  //logBuffer.push(`"processBatch()" - Processing batch of ${batch.length} items for fileKey=${fileKey}`);
+
+  // ──────────────────────────────────────────────────────────
+  // 1) Determine which items truly need an update
+  // ──────────────────────────────────────────────────────────
   const toUpdate = [];
-  let skipCount = 0, localFailCount = 0;
-  const updatedParts = [], skippedParts = [], failedParts = [];
+  let skipCount = 0;
+  let localFailCount = 0;
+
+  const updatedParts = [];
+  const skippedParts = [];
+  const failedParts = [];
 
   for (let i = 0; i < batch.length; i++) {
-      let item = batch[i];
-      const currentIndex = startIndex + i;
+    let item = batch[i];
+    let part_number = item.part_number;
+    let manufacturer = item.manufacturer?.trim() || "";
+    const currentIndex = startIndex + i;
+    
+    logInfoToFile(`"processBatch()" - Processing part_number=${part_number}`);
+    logInfoToFile(`"processBatch()" - currentIndex >= totalProductsInFile=${currentIndex >= totalProductsInFile}`);
 
-      if (currentIndex >= totalProductsInFile) break;
-      if (!item.part_number) {
-          localFailCount++;
+    if (currentIndex >= totalProductsInFile) break;
+    if (!part_number) {
+      localFailCount++;
+      continue;
+    }
+
+    try {
+      // 1a) Attempt to find the matching product
+      const productId = await getProductIdByPartNumber(part_number, manufacturer, currentIndex, totalProductsInFile, fileKey);
+      if (!productId) {
+        recordMissingProduct(fileKey, item);  // Record missing product details
+        localFailCount++;
+        failedParts.push(`Row ${currentIndex + 1}: No product found for ${part_number}`);
+        logErrorToFile(`"processBatch()" - Missing productId for part_number=${part_number}, marking as failed.`);
+        continue;
+      }
+
+      // 1b) Fetch existing product from Woo to see if an update is needed
+      const product = await getProductById(productId, fileKey, currentIndex);
+      if (!product) {
+        localFailCount++;
+        failedParts.push(`Row ${currentIndex + 1}: Product ID ${productId} not found`);
+        logErrorToFile(`❌ "processBatch()" - Could not find part_number=${part_number}, marking as failed.`);
+        continue;
+      }
+
+      const newData = createNewData(item, productId, part_number);
+      const currentData = filterCurrentData(product);
+
+      // ✅ Extract `part_number` from WooCommerce's meta_data field
+      let currentPartNumber = currentData.meta_data.find(meta => meta.key.toLowerCase() === "part_number")?.value?.trim() || "";
+      let currentManufacturer = currentData.meta_data.find(meta => meta.key.toLowerCase() === "manufacturer")?.value?.trim() || "";
+
+      logInfoToFile(`🔎 Extracted: currentPartNumber="${currentPartNumber}" | newData.part_number="${newData.part_number}"`);
+      logInfoToFile(`🔎 Extracted: currentManufacturer="${currentManufacturer}" | newData.manufacturer="${newData.manufacturer}"`);
+      
+      // ✅ If `part_number` is missing, use the product title as a fallback
+      if (!currentPartNumber) {
+        if (currentData.name && typeof currentData.name === "string") {
+            currentPartNumber = currentData.name.trim();
+            logInfoToFile(`✅ Using product name as fallback part_number="${currentPartNumber}" for productId=${productId}`);
+        } else {
+            logErrorToFile(`❌ Fallback failed: Product name is missing or invalid for productId=${productId}`);
+        }
+      }
+
+      // 🚀 Ensure both "part_number" and "manufacturer" match exactly
+      if (newData.part_number !== currentPartNumber || manufacturer !== currentManufacturer) {
+        logInfoToFile(`"processBatch()" - Skipping update: newData.part_number="${newData.part_number}" (CSV) does not match currentPartNumber="${currentPartNumber}" (WooCommerce) ` +
+           `OR newData.manufacturer="${manufacturer}" (CSV) does not match currentManufacturer="${currentManufacturer}" (WooCommerce)`);
+        //logBuffer.push(`"processBatch()" - Skipping update: newData.part_number="${newData.part_number}" (CSV) does not match currentPartNumber="${currentPartNumber}" (WooCommerce) ` +
+        //  `OR newData.manufacturer="${manufacturer}" (CSV) does not match currentManufacturer="${currentManufacturer}" (WooCommerce)`);
+        skipCount++;
+        skippedParts.push(`Row ${currentIndex + 1}: ${part_number} skipped due to mismatched part_number or manufacturer`);
+        continue;
+      }
+
+      logInfoToFile(`"processBatch()" - Checking product data for part_number=${part_number}`);
+
+      if (updateMode === "quantity") {
+
+        const currentQuantity = currentData.meta_data.find(meta => meta.key === "quantity")?.value || "0";
+        const newQuantity = newData.meta_data.find(meta => meta.key === "quantity")?.value || "0";
+
+        if (currentQuantity === newQuantity) {
+          skipCount++;
           continue;
+        }
+
+        toUpdate.push({
+          id: productId,
+          manufacturer,
+          meta_data: [{ key: "quantity", value: String(newQuantity) }]
+        });
+
+      } else {
+        // ** Check if any update is needed **
+        // 🚀 Use the isUpdateNeeded function to compare currentData and newData
+        const updateNeeded = isUpdateNeeded(currentData, newData, currentIndex, totalProductsInFile, part_number, fileKey);
+        if (!updateNeeded) {
+            skipCount++;
+            skippedParts.push(`Row ${currentIndex + 1}: ${part_number} skipped (no changes)`);
+            continue;
+        }
+
+        const fieldsToUpdate = [];
+        const changedFields = [];
+
+        // Iterate over meta_data and only add changed fields
+        newData.meta_data.forEach(newMeta => {
+          const currentMeta = currentData.meta_data.find(meta => meta.key === newMeta.key);
+          const currentMetaValue = currentMeta?.value || "";
+          const newMetaValue = newMeta.value;
+
+          // 🚀 Skip updating image_url if it contains "digikey.com"
+          if (newMeta.key === "image_url" && newMetaValue.includes("digikey.com")) {
+            logInfoToFile(`"processBatch()" - Skipping update for image_url as it contains "digikey.com"`);
+            //logBuffer.push(`"processBatch()" - Skipping update for image_url as it contains "digikey.com"`);
+            return;
+          }
+
+          // 🚀 Skip updating datasheet_url if it contains "digikey.com"
+          if ((newMeta.key === "datasheet_url" || newMeta.key === "datasheet") && newMetaValue.includes("digikey.com")) {
+            logInfoToFile(`"processBatch()" - Skipping update for datasheet as it contains "digikey.com"`);
+            //logBuffer.push(`"processBatch()" - Skipping update for datasheet as it contains "digikey.com"`);
+            return;
+          }
+
+          if (isCurrentMetaMissing(newMetaValue, currentMeta) || isMetaValueDifferent(newMetaValue, currentMetaValue)) {
+            fieldsToUpdate.push(newMeta);
+            changedFields.push({ key: newMeta.key, oldValue: currentMetaValue, newValue: newMetaValue });
+          }
+        });
+
+        if (fieldsToUpdate.length > 0) {
+
+          toUpdate.push({ id: productId, part_number, meta_data: fieldsToUpdate });
+          
+          // 🚀 Log only the fields that are different
+          logInfoToFile(
+            `Fields updated for part_number="${newData.part_number}, id=${productId}":\n` +
+            changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n")
+          );
+          // logBuffer.push(`Fields updated for part_number="${newData.part_number}":\n` +
+          // changedFields.map(field => `- ${field.key}: "${field.oldValue}" → "${field.newValue}"`).join("\n"));
+        } else {
+          skipCount++;
+        }
       }
+    } catch (err) {
+      localFailCount++;
+      failedParts.push(`Row ${currentIndex + 1}: ${part_number} failed - ${err.message}`);
+      logErrorToFile(`Error processing part_number=${part_number}: ${err.message}`, err.stack);
+    }
 
-      try {
-          // Fetch product ID and WooCommerce data
-          const { productId, currentData } = await fetchProductData(item, currentIndex, totalProductsInFile, fileKey);
-          if (!productId || !currentData) {
-              localFailCount++;
-              continue;
-          }
+    // ✅ Write final status JSON file
+    recordBatchStatus(fileKey, updatedParts, skippedParts, failedParts);
 
-          // Validate product match (ensures correct product before updating)
-          if (!validateProductMatch(item, currentData, productId, fileKey)) {
-              skipCount++;
-              continue;
-          }
+  } // End of for loop - looping through each item in the "batch"
 
-          // Generate new data for update
-          const newData = createNewData(item, productId, item.part_number);
-
-          // Handle update based on mode (quantity-only vs full update)
-          if (updateMode === "quantity") {
-              if (handleQuantityUpdate(newData, currentData, toUpdate, productId, item)) {
-                  updatedParts.push(`Row ${currentIndex + 1}: ${item.part_number} quantity updated.`);
-              } else {
-                  skipCount++;
-              }
-          } else {
-              if (handleFullUpdate(newData, currentData, toUpdate, productId, item)) {
-                  updatedParts.push(`Row ${currentIndex + 1}: ${item.part_number} fully updated.`);
-              } else {
-                  skipCount++;
-              }
-          }
-      } catch (err) {
-          localFailCount++;
-          failedParts.push(`Row ${currentIndex + 1}: ${item.part_number} failed - ${err.message}`);
-          logErrorToFile(`Error processing part_number=${item.part_number}: ${err.message}`, err.stack);
-      }
-
-      recordBatchStatus(fileKey, updatedParts, skippedParts, failedParts);
-  }
-
-  // Log skip/fail counts
+  // ──────────────────────────────────────────────────────────
+  // 1c) Increment skip/fail counters in Redis
+  // ──────────────────────────────────────────────────────────
   if (skipCount > 0) await redisClient.incrBy(`skipped-products:${fileKey}`, skipCount);
   if (localFailCount > 0) await redisClient.incrBy(`failed-products:${fileKey}`, localFailCount);
 
-  // Execute the batch update if there are changes
-  await executeBatchUpdate(toUpdate, fileKey, MAX_RETRIES);
+  // ──────────────────────────────────────────────────────────
+  // 2) If we have nothing to update, exit
+  // ──────────────────────────────────────────────────────────
+  if (toUpdate.length === 0) {
+    logInfoToFile(`No valid products to update in this batch for ${fileKey}. Done.`);
+    //logBuffer.push(`No valid products to update in this batch for ${fileKey}. Done.`);
+    return;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // 3) Attempt the actual WooCommerce bulk update (with retries)
+  // ──────────────────────────────────────────────────────────
+  while (attempts < MAX_RETRIES) {
+    try {
+      const jobId = createUniqueJobId(fileKey, action, startIndex, attempts);
+
+      const apiCallStart = performance.now();
+      const response = await scheduleApiRequest(
+        () => wooApi.put("products/batch", { update: toUpdate }),
+        { id: jobId }
+      );
+      const apiCallEnd = performance.now();
+      logInfoToFile(`WooCommerce API batch update took ${(apiCallEnd - apiCallStart).toFixed(2)} ms`);
+      //logBuffer.push(`WooCommerce API batch update took ${(apiCallEnd - apiCallStart).toFixed(2)} ms`);
+
+      // 3a) Parse the response to see how many were updated
+      //     Depending on the WooCommerce version, this might be in `response.data.update`.
+      //     The official docs show something like { "update": [ {...}, {...} ] }, "create": [], "delete": [] }
+      const data = response.data;
+      if (!data || !data.update) {
+        // Possibly an unexpected response structure => treat it as a partial or full fail
+        logErrorToFile(`Unexpected response structure from batch update. No 'update' array found.`);
+        await redisClient.incrBy(`failed-products:${fileKey}`, toUpdate.length);
+      } else {
+        const updatedCount = data.update.length;
+        const expectedCount = toUpdate.length;
+
+        // If partial
+        if (updatedCount < expectedCount) {
+          const diff = expectedCount - updatedCount;
+          await redisClient.incrBy(`failed-products:${fileKey}`, diff);
+          logErrorToFile(`Partial success: expected ${expectedCount} updates, got ${updatedCount}. Marking ${diff} as failed.`);
+        }
+
+        // Mark however many the API said were updated
+        if (updatedCount > 0) {
+          await redisClient.incrBy(`updated-products:${fileKey}`, updatedCount);
+        }
+
+        // Partial success with an "errors" array:
+        //   if (data.errors?.length) {
+        //       await redisClient.incrBy(`failed-products:${fileKey}`, data.errors.length);
+        //   }
+
+        // 3b) Log each item that was "intended" to update
+        for (const product of toUpdate) {
+          logUpdatesToFile(`Updated part_number=${product.part_number} in file=${fileKey}`);
+        }
+      }
+
+      // 3c) If we reach here, the call itself succeeded => break out of the retry loop
+      return;
+
+    } catch (err) {
+      attempts++;
+      logErrorToFile(`Batch update attempt ${attempts} for file="${fileKey}" failed: ${err.message}`);
+
+      if (attempts >= MAX_RETRIES) {
+        // If we exhaust all retries, consider them failed
+        await redisClient.incrBy(`failed-products:${fileKey}`, toUpdate.length);
+        throw new Error(`Batch update failed permanently after ${MAX_RETRIES} attempts. fileKey=${fileKey}`);
+      }
+      const delayMs = Math.pow(2, attempts) * 1000;
+      logInfoToFile(`"processBatch()" - Retrying after ${delayMs / 1000} seconds...`);
+      //logBuffer.push(`Retrying after ${delayMs / 1000} seconds...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  } // End of while loop
+
+  const batchEndTime = performance.now();
+  logInfoToFile(`Total time for processBatch(fileKey=${fileKey}, startIndex=${startIndex}): ${(batchEndTime - batchStartTime).toFixed(2)} ms`);
+  //logBuffer.push(`Total time for processBatch(fileKey=${fileKey}, startIndex=${startIndex}): ${(batchEndTime - batchStartTime).toFixed(2)} ms`);
+  
+  //logInfoToFile(logBuffer.join("\n")); // ✅ Log once for the batch
 }
 
 module.exports = {
