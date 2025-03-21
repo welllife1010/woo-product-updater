@@ -247,34 +247,6 @@ const formatAcfFieldName = (name) => {
  *
  * @returns {Object} A structured product update object formatted for WooCommerce's Bulk API.
  *
- * ### Example Input:
- * ```json
- * {
- *   "manufacturer": "Texas Instruments",
- *   "leadtime": "10 Weeks",
- *   "image_url": "https://example.com/image.jpg",
- *   "datasheet": "https://example.com/datasheet.pdf",
- *   "part_number": "ABC123",
- *   "quantity_available": "1000"
- * }
- * ```
- *
- * ### Example Output:
- * ```json
- * {
- *   "id": 12345,
- *   "part_number": "ABC123",
- *   "sku": "ABC123_Texas Instruments",
- *   "description": "",
- *   "meta_data": [
- *     { "key": "manufacturer", "value": "Texas Instruments" },
- *     { "key": "manufacturer_lead_weeks", "value": "10 Weeks" },
- *     { "key": "image_url", "value": "https://example.com/image.jpg" },
- *     { "key": "quantity", "value": "1000" },
- *     { "key": "additional_key_information", "value": "" }
- *   ]
- * }
- * ```
  */
 const createNewData = (item, productId, part_number) => {
   const updateMode = process.env.UPDATE_MODE || 'full';
@@ -385,30 +357,6 @@ const createNewData = (item, productId, part_number) => {
  * 
  * @returns {Object} A filtered product object containing only relevant fields.
  *
- * ### Example Input:
- * ```json
- * {
- *   "sku": "ABC123",
- *   "description": "Some electronic component",
- *   "meta_data": [
- *     { "key": "manufacturer", "value": "Texas Instruments" },
- *     { "key": "image_url", "value": "https://example.com/image.jpg" },
- *     { "key": "random_field", "value": "this should be removed" }
- *   ]
- * }
- * ```
- *
- * ### Example Output:
- * ```json
- * {
- *   "sku": "ABC123",
- *   "description": "Some electronic component",
- *   "meta_data": [
- *     { "key": "manufacturer", "value": "Texas Instruments" },
- *     { "key": "image_url", "value": "https://example.com/image.jpg" }
- *   ]
- * }
- * ```
  */
 const filterCurrentData = (product) => {
   return {
