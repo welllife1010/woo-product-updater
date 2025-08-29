@@ -16,16 +16,4 @@ const createUniqueJobId = (fileKey, action = "", rowIndex = 0, retryCount = "") 
     return jobId;
 };
 
-const handleError = (error, context = "Unknown") => {
-  if (error.code === "ENOTFOUND" || error.code === "ECONNRESET") {
-    logErrorToFile(`🔴 Network error in ${context}: ${error.message}`, error.stack);
-  } else if (error.name === "CSVError") {
-    logErrorToFile(`📉 CSV Parsing Error in ${context}: ${error.message}`, error.stack);
-  } else if (error.name === "NoSuchKey") {
-    logErrorToFile(`❌ S3 Error: File not found in ${context}: ${error.message}`, error.stack);
-  } else {
-    logErrorToFile(`❌ Unexpected Error in ${context}: ${error.message}`, error.stack);
-  }
-};
-
-module.exports = { handleError, createUniqueJobId };
+module.exports = { createUniqueJobId };

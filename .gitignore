@@ -8,7 +8,6 @@ test/
 input-json/
 output-csv/
 batch_status/
-missing_products_*/
 
 #files
 .DS_Store
