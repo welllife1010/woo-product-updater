@@ -5,7 +5,7 @@ const pinoPretty = require("pino-pretty");
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
-const { redisClient } = require('./queue');
+const { appRedis } = require('./queue');
 
 // Extend dayjs with UTC and timezone plugins
 dayjs.extend(utc);
@@ -62,7 +62,7 @@ const writeProgressToFile = (content) => {
 const logProgressToFile = async () => {
 
   try {
-    const fileKeys = await redisClient.keys("total-rows:*");
+    const fileKeys = await appRedis.keys("total-rows:*");
   
     if (fileKeys.length === 0) {
       console.log(`[${getPSTTimestamp()}] No progress to log.`);
@@ -74,10 +74,10 @@ const logProgressToFile = async () => {
 
     for (const key of fileKeys) {
       const fileKey = key.split(":")[1];
-      const totalRows = parseInt(await redisClient.get(`total-rows:${fileKey}`) || 0, 10);
-      const updated = parseInt(await redisClient.get(`updated-products:${fileKey}`) || 0, 10);
-      const skipped = parseInt(await redisClient.get(`skipped-products:${fileKey}`) || 0, 10);
-      const failed = parseInt(await redisClient.get(`failed-products:${fileKey}`) || 0, 10);
+      const totalRows = parseInt(await appRedis.get(`total-rows:${fileKey}`) || 0, 10);
+      const updated = parseInt(await appRedis.get(`updated-products:${fileKey}`) || 0, 10);
+      const skipped = parseInt(await appRedis.get(`skipped-products:${fileKey}`) || 0, 10);
+      const failed = parseInt(await appRedis.get(`failed-products:${fileKey}`) || 0, 10);
 
       const completed = updated + skipped + failed;
       const progress = totalRows > 0 ? Math.round((completed / totalRows) * 100) : 0;

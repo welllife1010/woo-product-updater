@@ -1,3 +1,4 @@
+const fs = require("fs");
 const { batchQueue } = require('./queue'); // Bull Queue instance
 const { S3Client, ListObjectsV2Command, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { promisify } = require("util");
@@ -5,21 +6,29 @@ const { Readable, pipeline } = require("stream"); // Promisify the stream pipeli
 const streamPipeline = promisify(pipeline); // Use async pipeline with stream promises
 const csvParser = require("csv-parser");
 const { logErrorToFile, logUpdatesToFile, logInfoToFile } = require("./logger");
-const { redisClient } = require('./queue');
+const { appRedis } = require('./queue');
 const { addBatchJob } = require('./job-manager');
-const { createUniqueJobId } = require('./utils');
+const { handleError, createUniqueJobId } = require('./utils');
 const { saveCheckpoint } = require('./checkpoint'); 
 
 const executionMode = process.env.EXECUTION_MODE || 'production';
 
 const initializeFileTracking = async (fileKey, totalRows) => {
-  await redisClient.set(`total-rows:${fileKey}`, totalRows);
-  await redisClient.set(`updated-products:${fileKey}`, 0);  
-  await redisClient.set(`skipped-products:${fileKey}`, 0);  
-  await redisClient.set(`failed-products:${fileKey}`, 0);   
+  try {
+    await appRedis.mSet({
+      [`total-rows:${fileKey}`]: String(totalRows), // Store totalRows as a string to avoid Redis type issues
+      [`updated-products:${fileKey}`]: "0",
+      [`skipped-products:${fileKey}`]: "0",
+      [`failed-products:${fileKey}`]: "0",
+    });
+
+    logInfoToFile(`✅ Debug: Successfully initialized tracking in Redis for ${fileKey}`);
+  } catch (error) {
+    logErrorToFile(`❌ Debug: Redis mSet failed in initializeFileTracking: ${error.message}`);
+  }
 };
 
-// AWS S3 setup (using AWS SDK v3)
+// ✅ **** AWS S3 setup (using AWS SDK v3) ****
 const s3Client = new S3Client({ 
   region: process.env.AWS_REGION_NAME,
   endpoint: process.env.AWS_ENDPOINT_URL, // Use specific bucket's region
@@ -71,7 +80,7 @@ const getLatestFolderKey = async (bucketName) => {
 
     return folders[0]; // Return the most recent folder
   } catch (error) {
-    logErrorToFile(`❌ Error in "getLatestFolderKey" function for bucket "${bucketName}": ${error.message}`, error.stack);
+    handleError(error, "getLatestFolderKey");
     return null;
   }
 };
@@ -109,48 +118,129 @@ const processCSVFilesInS3LatestFolder = async (bucketName, batchSize) => {
       try {
           logInfoToFile(`🔄 Processing file: ${file.Key}`);
           await readCSVAndEnqueueJobs(bucketName, file.Key, batchSize);
-
       } catch (error) {
-          logErrorToFile(`❌ Error processing file ${file.Key}. Error: ${error.message}`, error.stack);
+          logErrorToFile(`❌ 'processCSVFilesInS3LatestFolder()' - Error processing file ${file.Key}. Error: ${error.message}`, error.stack);
       }        
     });
 
     await Promise.all(fileProcessingTasks); // Wait for all files to process
-    logUpdatesToFile("✅ All CSV files in the latest folder have been read.");
+    logUpdatesToFile("✅ 'processCSVFilesInS3LatestFolder()' - All CSV files in the latest folder have been read.");
   } catch (error) {
-    logErrorToFile(`❌ Error in processCSVFilesInS3LatestFolder for bucket "${bucketName}": ${error.message}`, error.stack);
+    logErrorToFile(`❌ 'processCSVFilesInS3LatestFolder()' - Error for bucket "${bucketName}": ${error.message}`, error.stack);
   }
 };
 
 // ✅ **Get Total Rows Directly From S3 (No Redis)**
 const getTotalRowsFromS3 = async (bucketName, key) => {
   try {
-      const data = await s3Client.send(new GetObjectCommand({ Bucket: bucketName, Key: key }));
-      const bodyContent = await data.Body.transformToString();
-      const rows = bodyContent.split('\n');
-      return rows.length - 1; // Exclude header row
+
+    logInfoToFile(`🚀 Debug: getTotalRowsFromS3 called with bucketName=${bucketName}, key=${key}`);
+
+    const data = await s3Client.send(new GetObjectCommand({ Bucket: bucketName, Key: key }));
+    // ✅ Check if data and Body are valid
+    if (!data || !data.Body) {
+      logErrorToFile(`❌ Debug: getTotalRowsFromS3 - No data or Body received for file ${key}`);
+      return 0;
+    }
+
+    const bodyContent = await data.Body.transformToString();
+    // ✅ Check if bodyContent is a valid string
+    if (!bodyContent) {
+      logErrorToFile(`❌ Debug: getTotalRowsFromS3 - Empty content received for file ${key}`);
+      return 0;
+    }
+
+    const rows = bodyContent.split('\n').filter(row => row.trim() !== ''); // Remove empty lines
+    const totalRows = rows.length - 1; // Exclude header row
+
+    // Ensure totalRows is an integer
+    if (!Number.isInteger(totalRows) || totalRows < 0) {
+      logErrorToFile(`❌ Invalid totalRows detected in getTotalRowsFromS3 for ${key}: ${JSON.stringify(totalRows)}`);
+      return 0;
+    }
+
+    logInfoToFile(`✅ getTotalRowsFromS3: File ${key} has ${totalRows} rows.`);
+    return totalRows;
+
   } catch (error) {
     logErrorToFile(`❌ Failed to fetch totalRows for ${key} from S3: ${error.message}`);
     return null;
   }
 };
 
-// Read CSV from S3 and enqueue jobs
+// ✅ **Check for Existing Jobs Across All States**
+const checkExistingJobs = async (fileKey) => {
+  const jobStates = ["waiting", "active", "delayed"];
+  const jobs = await batchQueue.getJobs(jobStates);
+
+  return jobs.some(job => job.data.fileKey === fileKey);
+};
+
+// ✅ **Check if File is Fully Processed**
+const isFileFullyProcessed = (fileKey) => {
+  // ✅ Ensure checkpoint file exists before reading
+  if (!fs.existsSync("process_checkpoint.json")) {
+    logInfoToFile(`⚠️ process_checkpoint.json not found. Creating a new one.`);
+    fs.writeFileSync("process_checkpoint.json", JSON.stringify({}, null, 2));
+    return false; // No checkpoints yet, so assume not processed
+  }
+
+  const checkpointData = JSON.parse(fs.readFileSync("process_checkpoint.json", "utf-8") || "{}");
+  return checkpointData[fileKey]?.rowLevel?.remainingRows === 0;
+};
+
+// ✅ **Read CSV from S3 and enqueue jobs**
 const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
+
+  logInfoToFile(`🚀 Debug: 'readCSVAndEnqueueJobs()' called with bucketName=${bucketName}, key=${key}, batchSize=${batchSize}`);
+
   let totalRows = await getTotalRowsFromS3(bucketName, key);
-  // if (totalRows <= 0) {
-  //     logErrorToFile(`❌ Invalid totalRows (${totalRows}) for ${key}. Skipping processing.`);
-  //     return;
-  // }
-  if (totalRows === null) {
+
+  logInfoToFile(`🚀 Debug: 'readCSVAndEnqueueJobs()' - 'getTotalRowsFromS3()' Total rows fetched from S3 for ${key}: ${totalRows}`);
+
+  if (totalRows === null || totalRows <= 0) {
     logErrorToFile(`❌ Skipping ${key} due to S3 read error.`);
     return;
   }
 
-   // ✅ Initialize tracking for this file in Redis
-   await initializeFileTracking(key, totalRows);
+  // ✅ Check if the file has already been processed or exists in Redis
+  try {
+    const alreadyInQueue = await checkExistingJobs(key);
+    logInfoToFile(`✅ Debug: checkExistingJobs returned ${alreadyInQueue} for ${key}`);
+    if (alreadyInQueue) {
+      logInfoToFile(`⚠️ Debug: ${key} is already in queue. Skipping execution.`);
+      return;
+    }
+  } catch (error) {
+    logErrorToFile(`❌ Debug: checkExistingJobs threw an error: ${error.message}`);
+    return;
+  }
 
-   logInfoToFile(`🚀 Processing file: ${key} | Total Rows: ${totalRows} | Checkpoints set up in Redis`);
+  // ✅ Check if the file is already fully processed
+  try {
+    const fileProcessed = isFileFullyProcessed(key);
+    logInfoToFile(`✅ Debug: isFileFullyProcessed returned ${fileProcessed} for ${key}`);
+    if (fileProcessed) {
+      logInfoToFile(`✅ Debug: ${key} is already fully processed. Skipping execution.`);
+      return;
+    }
+  } catch (error) {
+    logErrorToFile(`❌ Debug: isFileFullyProcessed threw an error: ${error.message}`);
+    return;
+  }
+
+  logInfoToFile(`✅ Debug: Passed all checks in readCSVAndEnqueueJobs for ${key}, proceeding with initialization.`);
+
+  // ✅ Initialize tracking for this file in Redis
+  try {
+    await initializeFileTracking(key, totalRows);
+    logInfoToFile(`✅ Debug: initializeFileTracking completed for ${key}`);
+  } catch (error) {
+    logErrorToFile(`❌ Debug: initializeFileTracking threw an error: ${error.message}`);
+    return;
+  }
+
+  logInfoToFile(`🚀 Processing file: ${key} | Total Rows: ${totalRows} | Checkpoints set up in Redis`);
   
   // ✅ **Check for Duplicate Jobs Across All States**
   const allExistingJobs = await batchQueue.getJobs(["waiting", "active", "delayed", "completed", "failed"]);
@@ -163,6 +253,12 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
   });
   let lastProcessedRow = existingJobNumbers.length > 0 ? Math.max(...existingJobNumbers) : 0;
 
+  // ✅ Ensure lastProcessedRow is a valid number
+  if (isNaN(lastProcessedRow) || lastProcessedRow === null || lastProcessedRow === undefined || lastProcessedRow < 0) {
+      logErrorToFile(`❌ Debug: Invalid lastProcessedRow detected: ${JSON.stringify(lastProcessedRow)}. Resetting to 0.`);
+      lastProcessedRow = 0;
+  }
+
   // ✅ **Reset lastProcessedRow if no jobs exist**
   if (existingJobNumbers.length === 0) {
     logInfoToFile(`⚠️ No existing jobs found, resetting lastProcessedRow to 0.`);
@@ -170,9 +266,9 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
   }
 
   // ✅ **Check if All Rows Have Been Processed**
-  const totalCompleted = await redisClient.get(`updated-products:${key}`) || 0;
-  const totalSkipped = await redisClient.get(`skipped-products:${key}`) || 0;
-  const totalFailed = await redisClient.get(`failed-products:${key}`) || 0;
+  const totalCompleted = await appRedis.get(`updated-products:${key}`) || 0;
+  const totalSkipped = await appRedis.get(`skipped-products:${key}`) || 0;
+  const totalFailed = await appRedis.get(`failed-products:${key}`) || 0;
   const totalProcessed = parseInt(totalCompleted) + parseInt(totalSkipped) + parseInt(totalFailed);
 
   if (totalProcessed >= totalRows) {
@@ -217,8 +313,8 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
     const bodyContent = await data.Body.transformToString();
     let batch = [];
 
-    await redisClient.set(`total-rows:${key}`, totalRows); // Store individual file's row count
-    await redisClient.incrBy('overall-total-rows', totalRows); // Increment the overall total row count
+    await appRedis.set(`total-rows:${key}`, totalRows); // Store individual file's row count
+    await appRedis.incrBy('overall-total-rows', totalRows); // Increment the overall total row count
 
     // Create a data stream for further row-level processing
     const dataStream = Readable.from(bodyContent);
@@ -335,8 +431,13 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
 
     logUpdatesToFile(`Completed reading the file: "${key}", total rows: ${totalRows}`);
   } catch (error) {
-    logErrorToFile(`Error in readCSVAndEnqueueJobs for file "${key}" in bucket "${bucketName}": ${error.message}, error`);
-    throw error; // Ensure any error bubbles up to be caught in Promise.all
+    try {
+      handleError(error, `readCSVAndEnqueueJobs for ${key}`);
+      logErrorToFile(`🛑 Debug: Invalid argument received in readCSVAndEnqueueJobs: ${JSON.stringify(error)}`);
+      throw error; // Ensure any error bubbles up to be caught in Promise.all
+    } catch (error) {
+        logErrorToFile(`❌ Unexpected error: ${error.message}`, error.stack);
+    }
   } 
 };
 

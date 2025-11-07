@@ -1,0 +1,31 @@
+createNewData()
+
+### Example Input:
+```json
+{
+ "manufacturer": "Texas Instruments",
+  "leadtime": "10 Weeks",
+  "image_url": "https://example.com/image.jpg",
+  "datasheet": "https://example.com/datasheet.pdf",   
+  "part_number": "ABC123",
+  "quantity_available": "1000"
+}
+```
+
+### Example Output:
+```json
+{
+  "id": 12345,
+  "part_number": "ABC123",
+  "sku": "ABC123_Texas Instruments",
+  "description": "",
+  "meta_data": [
+    { "key": "manufacturer", "value": "Texas Instruments" },
+    { "key": "manufacturer_lead_weeks", "value": "10 Weeks" },
+    { "key": "image_url", "value": "https://example.com/image.jpg" },
+    { "key": "quantity", "value": "1000" },
+    { "key": "additional_key_information", "value": "" }
+  ]
+}
+
+

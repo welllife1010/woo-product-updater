@@ -8,6 +8,8 @@ test/
 input-json/
 output-csv/
 batch_status/
+missing_products_*/
+
 
 #files
 .DS_Store
@@ -17,6 +19,7 @@ updated-products-*
 process_checkpoint.json
 update-progress.txt
 ecosystem.config.js
+*backup*.js 
 
 # Logs
 logs

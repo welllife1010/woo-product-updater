@@ -1,7 +1,7 @@
 require("dotenv").config();
 const { Worker } = require("bullmq");
 const { logErrorToFile, logInfoToFile } = require("./logger");
-const { redisClient } = require('./queue');
+const { appRedis } = require('./queue');
 const { processBatch } = require('./batch-helpers'); 
 const { getLastProcessedRow, saveCheckpoint } = require("./checkpoint");
 
@@ -90,7 +90,7 @@ const gracefulShutdown = async () => {
         if (!allProcessed) {
             console.log("Not all jobs processed. Progress will resume on restart.");
         }
-        await redisClient.quit(); // Disconnect from Redis
+        await appRedis.quit(); // Disconnect from Redis
         console.log("Shutdown complete.");
     } catch (error) {
         console.error("Error during shutdown:", error.message);
@@ -105,14 +105,14 @@ process.on("SIGTERM", gracefulShutdown); // Handle termination signals
 // Check if all files have been processed
 const checkAllFilesProcessed = async () => {
     try {
-        const fileKeys = await redisClient.keys("total-rows:*"); // Get all file keys for processing
+        const fileKeys = await appRedis.keys("total-rows:*"); // Get all file keys for processing
 
         for (const key of fileKeys) {
             const fileKey = key.split(":")[1];
-            const totalRows = parseInt(await redisClient.get(`total-rows:${fileKey}`), 10);
-            const successfulUpdates = parseInt(await redisClient.get(`updated-products:${fileKey}`) || 0, 10);
-            const failedUpdates = parseInt(await redisClient.get(`failed-products:${fileKey}`) || 0, 10);
-            const skippedUpdates = parseInt(await redisClient.get(`skipped-products:${fileKey}`) || 0, 10);
+            const totalRows = parseInt(await appRedis.get(`total-rows:${fileKey}`), 10);
+            const successfulUpdates = parseInt(await appRedis.get(`updated-products:${fileKey}`) || 0, 10);
+            const failedUpdates = parseInt(await appRedis.get(`failed-products:${fileKey}`) || 0, 10);
+            const skippedUpdates = parseInt(await appRedis.get(`skipped-products:${fileKey}`) || 0, 10);
 
             // ✅ STOP if some rows are still processing
             if (successfulUpdates + failedUpdates + skippedUpdates < totalRows) {

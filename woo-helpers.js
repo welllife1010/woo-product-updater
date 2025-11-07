@@ -6,7 +6,7 @@ const WooCommerceRestApi = require("woocommerce-rest-ts-api").default;
 const { logger, logErrorToFile, logInfoToFile } = require("./logger");
 const { limiter, scheduleApiRequest } = require('./job-manager');
 const { createUniqueJobId } = require('./utils');
-const { redisClient } = require('./queue');
+const { appRedis } = require('./queue');
 
 // Function to get WooCommerce API credentials based on execution mode
 const getWooCommerceApiCredentials = (executionMode) => {
@@ -101,8 +101,8 @@ const getProductById = async (productId, fileKey, currentIndex) => {
   
 // Find product ID by custom field "part_number"
 const getProductIdByPartNumber = async (partNumber, manufacturer, currentIndex, totalProducts, fileKey) => {
-    let attempts = 0;
     const action = 'getProductIdByPartNumber';
+    let attempts = 0;
     let page = 1; // Start pagination
     let perPage = 5; // ✅ Fetch 5 products at a time
     let maxPages = 5; // ✅ Limit search to 5 pages
@@ -112,7 +112,7 @@ const getProductIdByPartNumber = async (partNumber, manufacturer, currentIndex, 
 
     // ✅ Check Redis cache before making WooCommerce API calls
     const cacheKey = `productId:${partNumber}:${normalizedManufacturer}`;
-    const cachedProductId = await redisClient.get(cacheKey);
+    const cachedProductId = await appRedis.get(cacheKey);
     if (cachedProductId) {
         logInfoToFile(`"getProductIdByPartNumber()" - ✅ Using cached Product ID ${cachedProductId} for Part Number: ${partNumber} | Manufacturer: ${manufacturer}`);
         return cachedProductId; // ✅ Return cached result
@@ -149,7 +149,7 @@ const getProductIdByPartNumber = async (partNumber, manufacturer, currentIndex, 
                         logInfoToFile(`"getProductIdByPartNumber()" - ✅ Found exact match for Part Number: ${partNumber} | Manufacturer: ${manufacturer} in file "${fileKey}".`);
     
                         // ✅ Store result in Redis with TTL (e.g., expire after 24 hours)
-                        await redisClient.set(cacheKey, product.id, { EX: 86400 });
+                        await appRedis.set(cacheKey, product.id, { EX: 86400 });
                         logInfoToFile(`"getProductIdByPartNumber()" - ✅ Caching Product ID ${product.id} in Redis.`);
     
                         logInfoToFile(`"getProductIdByPartNumber()" - ✅ returning Product ID ${product.id} for Part Number: ${partNumber} | Manufacturer: ${manufacturer}`);

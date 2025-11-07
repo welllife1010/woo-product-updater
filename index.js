@@ -1,7 +1,7 @@
 const dotenv = require("dotenv");
 dotenv.config();
 
-const { redisClient } = require('./queue');
+const { appRedis } = require('./queue');
 const { batchQueue } = require('./queue');
 const { getLatestFolderKey, processCSVFilesInS3LatestFolder } = require('./s3-helpers');
 const { logger, logErrorToFile,logUpdatesToFile, logInfoToFile, logProgressToFile } = require("./logger");
@@ -141,13 +141,13 @@ const server = app.listen(PORT, () => {
 // Check if all files are processed (you can write your own logic)
 const checkAllFilesProcessed = async () => {
   try {
-    const fileKeys = await redisClient.keys("total-rows:*");
+    const fileKeys = await appRedis.keys("total-rows:*");
     for (const key of fileKeys) {
       const fileKey = key.split(":")[1];
-      const totalRows = parseInt(await redisClient.get(`total-rows:${fileKey}`), 10);
-      const updated = parseInt(await redisClient.get(`updated-products:${fileKey}`) || 0, 10);
-      const skipped = parseInt(await redisClient.get(`skipped-products:${fileKey}`) || 0, 10);
-      const failed = parseInt(await redisClient.get(`failed-products:${fileKey}`) || 0, 10);
+      const totalRows = parseInt(await appRedis.get(`total-rows:${fileKey}`), 10);
+      const updated = parseInt(await appRedis.get(`updated-products:${fileKey}`) || 0, 10);
+      const skipped = parseInt(await appRedis.get(`skipped-products:${fileKey}`) || 0, 10);
+      const failed = parseInt(await appRedis.get(`failed-products:${fileKey}`) || 0, 10);
       if (updated + skipped + failed < totalRows) {
         return false; // At least one file is still in progress
       }
@@ -173,7 +173,7 @@ const shutdownCheckInterval = setInterval(async () => {
     // Close the Express server
     server.close(() => {
       // Disconnect from Redis
-      redisClient.quit().then(() => process.exit(0));
+      appRedis.quit().then(() => process.exit(0));
     });
   }
 }, 5000); // Check every 5 seconds
