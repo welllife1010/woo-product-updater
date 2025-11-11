@@ -2,7 +2,7 @@ require("dotenv").config();
 const { Worker } = require("bullmq");
 const { logErrorToFile, logInfoToFile } = require("./logger");
 const { appRedis } = require('./queue');
-const { processBatch } = require('./batch-helpers'); 
+const { processBatch } = require("./src/batch"); 
 const { getLastProcessedRow, saveCheckpoint } = require("./checkpoint");
 
 // Initialize dynamic concurrency and batch size

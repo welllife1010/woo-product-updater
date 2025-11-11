@@ -379,14 +379,14 @@ const filterCurrentData = (product) => {
 // ***************************************************************************
 const recordMissingProduct = (fileKey, item) => {
 
-  // ✅ Ensure fileKey does not have .csv before creating the file path
+  // 1. Ensure fileKey does not have .csv before creating the file path
   const cleanFileKey = fileKey.replace(/\.csv$/, ""); 
 
-  // ✅ Construct the correct missing file path
+  // 2. Construct the correct missing file path
   const missingFilePath = path.join(__dirname, `missing_products_${cleanFileKey}.json`);
   let missingProducts = [];
   
-  // If the file exists, read its current content
+  // 3. If the file exists, read its current content
   if (fs.existsSync(missingFilePath)) {
     try {
       missingProducts = JSON.parse(fs.readFileSync(missingFilePath, 'utf8'));
@@ -395,16 +395,16 @@ const recordMissingProduct = (fileKey, item) => {
     }
   }
   
-  // ✅  Add the current item (from the CSV) to the array
+  // 4. Add the current item (from the CSV) to the array
   missingProducts.push(item);
 
-   // ✅ Ensure the directory exists before writing the file
-   const dir = path.dirname(missingFilePath);
-   if (!fs.existsSync(dir)) {
-       fs.mkdirSync(dir, { recursive: true });
-   }
+  // 5. Ensure the directory exists before writing the file
+  const dir = path.dirname(missingFilePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
   
-  // ✅ Write the updated array back to the file
+  // 6. Write the updated array back to the file
   fs.writeFileSync(missingFilePath, JSON.stringify(missingProducts, null, 2));
   logInfoToFile(`Recorded missing product for part_number=${item.part_number} in file ${missingFilePath}`);
 };
