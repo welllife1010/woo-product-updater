@@ -13,6 +13,12 @@ const { saveCheckpoint } = require('./checkpoint');
 
 const executionMode = process.env.EXECUTION_MODE || 'production';
 
+// 1-based header row index: 10 for new template, 1 for "normal" CSVs.
+const CSV_HEADER_ROW = Number(process.env.CSV_HEADER_ROW || "10");
+
+// csv-parser's skipLines is 0-based "lines to ignore before header".
+const CSV_SKIP_LINES = CSV_HEADER_ROW > 0 ? CSV_HEADER_ROW - 1 : 0;
+
 const initializeFileTracking = async (fileKey, totalRows) => {
   try {
     await appRedis.mSet({
@@ -151,8 +157,9 @@ const getTotalRowsFromS3 = async (bucketName, key) => {
     }
 
     const rows = bodyContent.split('\n').filter(row => row.trim() !== ''); // Remove empty lines
-    // First 9 lines + header line (row 10) are not data:
-    const HEADER_OFFSET = 10;
+
+    // HEADER_OFFSET = which row is the header (1-based)
+    const HEADER_OFFSET = CSV_HEADER_ROW; // same as env
     const totalRows = Math.max(rows.length - HEADER_OFFSET, 0);
     // const totalRows = rows.length - 1; // Exclude header row
 
@@ -326,7 +333,7 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
     await streamPipeline(
       dataStream,
       // headers start at row 10 -> skip the first 9 lines
-      csvParser({ skipLines: 9 }),
+      csvParser({ skipLines: CSV_SKIP_LINES }),
       // Iterates over each row in the CSV asynchronously, allowing us to handle each chunk (row) as it arrives, without waiting for the entire file to load.
       async function* (source) {
         logInfoToFile(`Processing CSV: ${key}, on row ${lastProcessedRow + 1} / ${totalRows}`);
