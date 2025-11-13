@@ -108,12 +108,15 @@ const createNewData = (item, productId, part_number) => {
 
   if (updateMode === "quantity") {
     return {
-      id: productId,
-      part_number: row.part_number || part_number,
-      manufacturer: row.manufacturer || "",
-      meta_data: [{ key: "quantity", value: row.quantity_available || "0" }],
+        id: productId,
+        part_number: row.part_number || part_number,
+        manufacturer: row.manufacturer || "",
+        meta_data: [{
+        key: "quantity",
+        value: row.quantity || row.quantity_available || "0"
+        }],
     };
-  }
+    }
 
   // 1) Map CSV → meta_data known keys
   const metaDataKeyMap = {
@@ -121,20 +124,41 @@ const createNewData = (item, productId, part_number) => {
     leadtime: "manufacturer_lead_weeks",
     image_url: "image_url",
     series: "series",
+
+    // Quantity – support both old and new
     quantity_available: "quantity",
+    quantity: "quantity",
+
     operating_temperature: "operating_temperature",
+
+    // Voltage – support both old and new
     voltage___supply: "voltage",
+    voltage: "voltage",
+
+    // Packaging / package
     package___case: "package",
+    packaging: "packaging",
+
     supplier_device_package: "supplier_device_package",
     mounting_type: "mounting_type",
     short_description: "short_description",
     part_description: "detail_description",
+
+    // Compliance / statuses – support both old and new
     reachstatus: "reach_status",
+    reach_status: "reach_status",
     rohsstatus: "rohs_status",
+    rohs_status: "rohs_status",
+
     moisturesensitivitylevel: "moisture_sensitivity_level",
+    moisture_sensitivity_level: "moisture_sensitivity_level",
+
     exportcontrolclassnumber: "export_control_class_number",
+    export_control_class_number: "export_control_class_number",
+
     htsuscode: "htsus_code",
-  };
+    htsus_code: "htsus_code",
+    };
 
   const productMetaData = Object.keys(metaDataKeyMap)
     .filter((csvKey) => Object.prototype.hasOwnProperty.call(row, csvKey))

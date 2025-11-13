@@ -151,7 +151,10 @@ const getTotalRowsFromS3 = async (bucketName, key) => {
     }
 
     const rows = bodyContent.split('\n').filter(row => row.trim() !== ''); // Remove empty lines
-    const totalRows = rows.length - 1; // Exclude header row
+    // First 9 lines + header line (row 10) are not data:
+    const HEADER_OFFSET = 10;
+    const totalRows = Math.max(rows.length - HEADER_OFFSET, 0);
+    // const totalRows = rows.length - 1; // Exclude header row
 
     // Ensure totalRows is an integer
     if (!Number.isInteger(totalRows) || totalRows < 0) {
