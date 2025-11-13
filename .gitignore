@@ -9,7 +9,10 @@ input-json/
 output-csv/
 batch_status/
 missing_products_*/
+file-structure-ref/
 
+# database files
+dump.rdb
 
 #files
 .DS_Store

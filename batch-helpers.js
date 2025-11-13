@@ -228,6 +228,44 @@ const formatAcfFieldName = (name) => {
     .replace(/\b\w/g, (l) => l.toUpperCase()); // Capitalize each word
 };
 
+// ***************************************************************************
+// Helper - Create new WooCommerce product data object
+// ***************************************************************************
+// Map raw normalized CSV headers -> canonical keys your code uses everywhere
+const FIELD_ALIASES = {
+  // Column 1/2 name variants
+  "manufacturer_part_number": "part_number",
+  "mfr_part_number": "part_number",
+
+  // Description variants (column 2 may be any of these)
+  "product_description": "part_description",
+  "short_product_description": "short_description",
+  "detailed_product_description": "detail_description",
+
+  // New or variant spec names
+  "stock_quantity": "quantity",          // ACF "quantity"
+  "quantity_available": "quantity",      // keep existing
+  "voltage": "voltage",                  // keep it canonical
+  "operating_temperature": "operating_temperature",
+  "supplier_device_package": "supplier_device_package",
+  "packaging": "packaging",              // new
+  "rohs_compliance": "rohs_status",
+  "reach_compliance": "reach_status",
+  "hts_code": "htsus_code",
+  "eccn": "export_control_class_number",
+  "moisture_sensitivity_level": "moisture_sensitivity_level"
+};
+
+// Apply aliases before mapping
+const applyAliases = (normalizedRow) => {
+  const out = {};
+  for (const [k, v] of Object.entries(normalizedRow)) {
+    const alias = FIELD_ALIASES[k] || k;
+    out[alias] = v;
+  }
+  return out;
+};
+
 /**
  * Creates a new WooCommerce product data object formatted for bulk updates.
  *
@@ -282,7 +320,17 @@ const createNewData = (item, productId, part_number) => {
     rohsstatus: "rohs_status",
     moisturesensitivitylevel: "moisture_sensitivity_level",
     exportcontrolclassnumber: "export_control_class_number",
-    htsuscode: "htsus_code"
+    htsuscode: "htsus_code",
+
+    // New canonical keys from aliases
+    packaging: "packaging",
+    quantity: "quantity",
+    voltage: "voltage",
+    reach_status: "reach_status",
+    rohs_status: "rohs_status",
+    moisture_sensitivity_level: "moisture_sensitivity_level",
+    export_control_class_number: "export_control_class_number",
+    htsus_code: "htsus_code",
   };
 
   // Process and map valid meta_data fields

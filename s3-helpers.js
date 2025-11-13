@@ -322,7 +322,8 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
     //  Use dataStream for processing rows
     await streamPipeline(
       dataStream,
-      csvParser(),
+      // headers start at row 10 -> skip the first 9 lines
+      csvParser({ skipLines: 9 }),
       // Iterates over each row in the CSV asynchronously, allowing us to handle each chunk (row) as it arrives, without waiting for the entire file to load.
       async function* (source) {
         logInfoToFile(`Processing CSV: ${key}, on row ${lastProcessedRow + 1} / ${totalRows}`);

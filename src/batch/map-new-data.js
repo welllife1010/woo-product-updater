@@ -12,6 +12,41 @@ SCOPE:
 
 const { normalizeText } = require("./text-utils");
 
+// Map raw normalized CSV headers -> canonical keys your code uses everywhere
+const FIELD_ALIASES = {
+  // Column 1/2 name variants
+  "manufacturer_part_number": "part_number",
+  "mfr_part_number": "part_number",
+
+  // Description variants (column 2 may be any of these)
+  "product_description": "part_description",
+  "short_product_description": "short_description",
+  "detailed_product_description": "detail_description",
+
+  // New or variant spec names
+  "stock_quantity": "quantity",          // ACF "quantity"
+  "quantity_available": "quantity",      // keep existing
+  "voltage": "voltage",                  // keep it canonical
+  "operating_temperature": "operating_temperature",
+  "supplier_device_package": "supplier_device_package",
+  "packaging": "packaging",              // new
+  "rohs_compliance": "rohs_status",
+  "reach_compliance": "reach_status",
+  "hts_code": "htsus_code",
+  "eccn": "export_control_class_number",
+  "moisture_sensitivity_level": "moisture_sensitivity_level"
+};
+
+// Apply aliases before mapping
+const applyAliases = (normalizedRow) => {
+  const out = {};
+  for (const [k, v] of Object.entries(normalizedRow)) {
+    const alias = FIELD_ALIASES[k] || k;
+    out[alias] = v;
+  }
+  return out;
+};
+
 /**
 * @function normalizeCsvHeaders
 * @description Produces a case/space-insensitive row so upstream CSV idiosyncrasies
@@ -62,7 +97,14 @@ const formatAcfFieldName = (name) =>
 */
 const createNewData = (item, productId, part_number) => {
   const updateMode = process.env.UPDATE_MODE || "full";
-  const row = normalizeCsvHeaders(item);
+  const normalizedCsvRow = normalizeCsvHeaders(item);
+  const row = applyAliases(normalizedCsvRow);
+
+  const description =
+  row.detail_description ||
+  row.short_description ||
+  row.part_description ||  // already mapped from product_description
+  ""; 
 
   if (updateMode === "quantity") {
     return {
@@ -136,7 +178,7 @@ const createNewData = (item, productId, part_number) => {
     id: productId,
     part_number: row.part_number || part_number,
     sku: row.sku || `${row.part_number}_${row.manufacturer}` || row.part_number,
-    description: row.part_description || "",
+    description: description,
     meta_data: [...productMetaData, { key: "additional_key_information", value: additionalInfo || "" }],
   };
 };
