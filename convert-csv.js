@@ -1,9 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parse } = require('json2csv');
-
-// Base URL for the S3 bucket
-const BASE_URL = 'https://suntsu-products-s3-bucket.s3.us-west-1.amazonaws.com/';
+require('dotenv').config();
 
 const invalidFilePath = path.join(__dirname, '/input-json/invalid_datasheet_urls_controllers.json');
 const failedFilePath = path.join(__dirname, '/input-json/failed.json');
@@ -24,7 +22,7 @@ try {
     const csvData = filteredData.map(item => {
         const categorySlug = item.category; // Use category directly as the slug
         let partNumber = item.title.replace(/\//g, '-'); // Replace slashes with dashes
-        const datasheetUrl = `${BASE_URL}${categorySlug}/${partNumber}.pdf`;
+        const datasheetUrl = `${process.env.S3_Products_Base_URL}${categorySlug}/${partNumber}.pdf`;
 
         return {
             Part_Id: item.id,
