@@ -22,6 +22,44 @@ const {
 } = require("./handlers")
 const { recordBatchStatus } = require("./io-status")
 
+// Fuzzy category resolver (Fuse.js + category-hierarchy-ref.csv)
+const { resolveCategory } = require("../../category-map");
+
+/**
+ * Try to extract a "vendor category" hint from a CSV row.
+ * Adjust these keys once you know the real column names
+ * that vendors are using for category-ish info.
+ */
+function getVendorCategoryFromRow(item) {
+  if (!item || typeof item !== "object") return "";
+
+  // These are guesses – update to match your real CSV headers (after normalization)
+  return (
+    item.category ||
+    item.product_category ||
+    item["product_category"] ||
+    item["category"] ||
+    ""
+  );
+}
+
+/**
+ * Build a human-readable category path from a resolvedCategory object.
+ * e.g. { main: "Cables, Wires", sub: "Fiber Optic Cables", sub2: null }
+ *  -> "Cables, Wires > Fiber Optic Cables"
+ */
+function buildCategoryPath(resolvedCategory) {
+  if (!resolvedCategory) return "";
+
+  const parts = [
+    resolvedCategory.main,
+    resolvedCategory.sub,
+    resolvedCategory.sub2,
+  ].filter(Boolean); // drop null/undefined/empty
+
+  return parts.join(" > ");
+}
+
 /**
  * @function processBatch
  * @description Processes a contiguous slice (batch) of CSV rows and pushes
@@ -79,7 +117,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         item,
         currentIndex,
         totalProductsInFile,
-        fileKe
+        fileKey
       )
       if (!productId || !currentData) {
         localFailCount++
@@ -96,8 +134,77 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         continue
       }
 
+      // --------------------------------------------
+      // Resolve category from vendor data (if any)
+      // --------------------------------------------
+      let resolvedCategory = null;
+
+      // No need to fuzzy-match categories when we're only doing quantity updates
+      if (updateMode === "full") {
+        try {
+          const vendorCategory = getVendorCategoryFromRow(item);
+
+          if (vendorCategory) {
+            resolvedCategory = await resolveCategory(vendorCategory);
+
+            if (resolvedCategory) {
+              const path = buildCategoryPath(resolvedCategory);
+              logInfoToFile(
+                `"processBatch()" - Category match for part_number=${item.part_number}: ` +
+                `"${vendorCategory}" → "${path}" (score=${resolvedCategory.score.toFixed(
+                  3
+                )}, matchedOn=${resolvedCategory.matchedOn})`
+              );
+            } else {
+              logInfoToFile(
+                `"processBatch()" - No category match for part_number=${item.part_number}, vendorCategory="${vendorCategory}"`
+              );
+            }
+          } else {
+            logInfoToFile(
+              `"processBatch()" - No vendorCategory field present for part_number=${item.part_number}`
+            );
+          }
+        } catch (catErr) {
+          logErrorToFile(
+            `"processBatch()" - Category resolution error for part_number=${item.part_number}: ${catErr.message}`,
+            catErr.stack
+          );
+        }
+      }
+
+      // --------------------------------------------
+      // Generate new data for update (existing logic)
+      // --------------------------------------------
       // Step C) Build the candidate update payload
       const newData = createNewData(item, productId, item.part_number)
+
+      // --------------------------------------------
+      // Attach proposed category info to meta_data
+      // (safe: does NOT change actual Woo categories yet)
+      // --------------------------------------------
+      if (resolvedCategory && Array.isArray(newData.meta_data)) {
+        const path = buildCategoryPath(resolvedCategory);
+
+        newData.meta_data.push(
+          {
+            key: "proposed_category_main",
+            value: resolvedCategory.main || "",
+          },
+          {
+            key: "proposed_category_sub",
+            value: resolvedCategory.sub || "",
+          },
+          {
+            key: "proposed_category_sub2",
+            value: resolvedCategory.sub2 || "",
+          },
+          {
+            key: "proposed_category_path",
+            value: path,
+          }
+        );
+      }
 
       // Step D) Route by UPDATE_MODE
       if (updateMode === "quantity") {
@@ -120,8 +227,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
             currentData,
             toUpdate,
             productId,
-            item,
-            fileKey
+            item
           )
         ) {
           updatedParts.push(

@@ -7,6 +7,8 @@ const { wooApi, getProductById, getProductIdByPartNumber } = require("./woo-help
 const { appRedis } = require('./queue');
 const { scheduleApiRequest } = require('./job-manager');
 const { createUniqueJobId } = require('./utils');
+// Fuzzy category resolver (Fuse.js + category-hierarchy-ref.csv)
+const { resolveCategory } = require("./category-map");
 
 let stripHtml;
 (async () => {
@@ -513,7 +515,7 @@ function handleQuantityUpdate(newData, currentData, toUpdate, productId, item) {
 
 // 4️⃣ handleFullUpdate() → Process full product updates
 function handleFullUpdate(newData, currentData, toUpdate, productId, item) {
-  if (!isUpdateNeeded(currentData, newData)) {
+  if (!isUpdateNeeded(currentData, newData, null, null, item.part_number, fileKey)) {
       logInfoToFile(`Skipping update for part_number=${item.part_number} (no changes detected).`);
       return false;
   }
@@ -545,6 +547,41 @@ async function executeBatchUpdate(toUpdate, fileKey, MAX_RETRIES) {
           await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempts) * 1000));
       }
   }
+}
+
+/**
+ * Try to extract a "vendor category" hint from a CSV row.
+ * Adjust these keys once you know the real column names
+ * that vendors are using for category-ish info.
+ */
+function getVendorCategoryFromRow(item) {
+  if (!item || typeof item !== "object") return "";
+
+  // These are guesses – update to match your real CSV headers (after normalization)
+  return (
+    item.category ||
+    item.product_category ||
+    item["product_category"] ||
+    item["category"] ||
+    ""
+  );
+}
+
+/**
+ * Build a human-readable category path from a resolvedCategory object.
+ * e.g. { main: "Cables, Wires", sub: "Fiber Optic Cables", sub2: null }
+ *  -> "Cables, Wires > Fiber Optic Cables"
+ */
+function buildCategoryPath(resolvedCategory) {
+  if (!resolvedCategory) return "";
+
+  const parts = [
+    resolvedCategory.main,
+    resolvedCategory.sub,
+    resolvedCategory.sub2,
+  ].filter(Boolean); // drop null/undefined/empty
+
+  return parts.join(" > ");
 }
 
 // ***************************************************************************
@@ -591,8 +628,76 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
               continue;
           }
 
-          // Generate new data for update
+          // --------------------------------------------
+          // Resolve category from vendor data (if any)
+          // --------------------------------------------
+          let resolvedCategory = null;
+
+          // No need to fuzzy-match categories when we're only doing quantity updates
+          if (updateMode === "full") {
+            try {
+              const vendorCategory = getVendorCategoryFromRow(item);
+
+              if (vendorCategory) {
+                resolvedCategory = await resolveCategory(vendorCategory);
+
+                if (resolvedCategory) {
+                  const path = buildCategoryPath(resolvedCategory);
+                  logInfoToFile(
+                    `"processBatch()" - Category match for part_number=${item.part_number}: ` +
+                    `"${vendorCategory}" → "${path}" (score=${resolvedCategory.score.toFixed(
+                      3
+                    )}, matchedOn=${resolvedCategory.matchedOn})`
+                  );
+                } else {
+                  logInfoToFile(
+                    `"processBatch()" - No category match for part_number=${item.part_number}, vendorCategory="${vendorCategory}"`
+                  );
+                }
+              } else {
+                logInfoToFile(
+                  `"processBatch()" - No vendorCategory field present for part_number=${item.part_number}`
+                );
+              }
+            } catch (catErr) {
+              logErrorToFile(
+                `"processBatch()" - Category resolution error for part_number=${item.part_number}: ${catErr.message}`,
+                catErr.stack
+              );
+            }
+          }
+
+          // --------------------------------------------
+          // Generate new data for update (existing logic)
+          // --------------------------------------------
           const newData = createNewData(item, productId, item.part_number);
+
+          // --------------------------------------------
+          // Attach proposed category info to meta_data
+          // (safe: does NOT change actual Woo categories yet)
+          // --------------------------------------------
+          if (resolvedCategory && Array.isArray(newData.meta_data)) {
+            const path = buildCategoryPath(resolvedCategory);
+
+            newData.meta_data.push(
+              {
+                key: "proposed_category_main",
+                value: resolvedCategory.main || "",
+              },
+              {
+                key: "proposed_category_sub",
+                value: resolvedCategory.sub || "",
+              },
+              {
+                key: "proposed_category_sub2",
+                value: resolvedCategory.sub2 || "",
+              },
+              {
+                key: "proposed_category_path",
+                value: path,
+              }
+            );
+          }
 
           // Handle update based on mode (quantity-only vs full update)
           if (updateMode === "quantity") {
