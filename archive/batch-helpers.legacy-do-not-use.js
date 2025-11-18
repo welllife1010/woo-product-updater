@@ -1,3 +1,6 @@
+// ⚠️ LEGACY FILE - DO NOT IMPORT IN NEW CODE OR TESTS
+// Kept only for historical reference.
+
 const fs = require("fs");
 const path = require("path");
 const { performance } = require("perf_hooks"); // Import performance to track time

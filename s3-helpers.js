@@ -343,6 +343,7 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
             lastProcessedRow++;
 
             // Convert each row to an object with lowercase keys
+            // That object (normalizedData) is what ends up as item inside processBatch.
             const normalizedData = Object.keys(chunk).reduce((acc, rawKey) => {
               const safeKey = rawKey.trim().toLowerCase().replace(/\s+/g, "_");
               acc[safeKey] = chunk[rawKey];

@@ -25,23 +25,39 @@ const { recordBatchStatus } = require("./io-status")
 // Fuzzy category resolver (Fuse.js + category-hierarchy-ref.csv)
 const { resolveCategory } = require("../../category-map");
 
+// Apply category hierarchy to WooCommerce
+const { ensureCategoryHierarchy } = require("./category-apply");
+
 /**
  * Try to extract a "vendor category" hint from a CSV row.
- * Adjust these keys once you know the real column names
- * that vendors are using for category-ish info.
+ *
+ * We look for normalized keys like:
+ *   - main_category
+ *   - sub_category
+ *   - 2nd_sub_category
+ *   - category
+ *   - product_category
+ *
+ * You can extend this list later if vendors use different headers.
  */
 function getVendorCategoryFromRow(item) {
   if (!item || typeof item !== "object") return "";
 
-  // These are guesses – update to match your real CSV headers (after normalization)
-  return (
-    item.category ||
-    item.product_category ||
-    item["product_category"] ||
-    item["category"] ||
-    ""
-  );
+  const parts = [];
+
+  // Most explicit: if CSV has separate columns
+  if (item.main_category) parts.push(item.main_category);
+  if (item.sub_category) parts.push(item.sub_category);
+  if (item["2nd_sub_category"]) parts.push(item["2nd_sub_category"]);
+
+  // Fallbacks: single category-like columns
+  if (!parts.length && item.category) parts.push(item.category);
+  if (!parts.length && item.product_category) parts.push(item.product_category);
+
+  // Join into one string for fuzzy match
+  return parts.filter(Boolean).join(" > ");
 }
+
 
 /**
  * Build a human-readable category path from a resolvedCategory object.
@@ -177,11 +193,10 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       // Generate new data for update (existing logic)
       // --------------------------------------------
       // Step C) Build the candidate update payload
-      const newData = createNewData(item, productId, item.part_number)
+      const newData = createNewData(item, productId, item.part_number);
 
       // --------------------------------------------
-      // Attach proposed category info to meta_data
-      // (safe: does NOT change actual Woo categories yet)
+      // Attach proposed category info (for auditing)
       // --------------------------------------------
       if (resolvedCategory && Array.isArray(newData.meta_data)) {
         const path = buildCategoryPath(resolvedCategory);
@@ -204,6 +219,37 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
             value: path,
           }
         );
+      }
+
+      // --------------------------------------------
+      // Ensure category hierarchy exists in Woo and
+      // assign these category IDs to the product.
+      // --------------------------------------------
+      if (resolvedCategory) {
+        try {
+          const hierarchy = await ensureCategoryHierarchy(resolvedCategory);
+
+          if (hierarchy && Array.isArray(hierarchy.ids) && hierarchy.ids.length) {
+            // Merge with any existing categories in newData
+            const existingIds = (newData.categories || []).map((c) => c.id);
+            const mergedIds = Array.from(
+              new Set([...existingIds, ...hierarchy.ids])
+            );
+
+            newData.categories = mergedIds.map((id) => ({ id }));
+
+            logInfoToFile(
+              `"processBatch()" - Assigned categories [${mergedIds.join(
+                ", "
+              )}] to part_number=${item.part_number}`
+            );
+          }
+        } catch (catApplyErr) {
+          logErrorToFile(
+            `"processBatch()" - Failed to apply category hierarchy for part_number=${item.part_number}: ${catApplyErr.message}`,
+            catApplyErr.stack
+          );
+        }
       }
 
       // Step D) Route by UPDATE_MODE
