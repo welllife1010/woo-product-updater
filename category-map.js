@@ -34,7 +34,7 @@ function normalizeName(value) {
 }
 
 /**
- * Internal: build CATEGORY_ROWS from a CSV row.
+ * Internal: build CATEGORY_ROWS from a CSV row (CSV from Mun for category mapping).
  * CSV is expected to have headers:
  *   "Main Category", "Sub category", "2nd sub category"
  */

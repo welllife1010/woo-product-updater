@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "NODE_ENV=test jest"
+    "test": "NODE_ENV=test jest",
+    "test-missing-cat": "EXECUTION_MODE=development NODE_ENV=test node create-missing-products.js test"
   },
   "keywords": [],
   "author": "",

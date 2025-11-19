@@ -2,7 +2,7 @@
  * queue.js - BullMQ queue + app Redis client (env-driven)
  *
  * BullMQ uses ioredis under the hood (we pass "connection" options).
- * Your app uses node-redis for simple KV (counters, checkpoints, etc.).
+ * This app uses node-redis for simple KV (counters, checkpoints, etc.).
  *
  * IMPORTANT:
  * - In normal runs (production / dev), we connect to Redis.
@@ -21,7 +21,7 @@ const { createClient } = require("redis");
 // ---------------------------------------------
 
 /**
- * When you run `npm test`, our package.json sets:
+ * When we run `npm test`, our package.json sets:
  *   "test": "NODE_ENV=test jest"
  *
  * So inside tests, process.env.NODE_ENV === "test".
