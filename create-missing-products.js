@@ -378,8 +378,14 @@ const processMissingProducts = async (fileKey) => {
           )}]`
         );
       } catch (error) {
+        const status = error.response?.status;
+        const data = error.response?.data;
+
         logErrorToFile(
-          `[create-missing-products] ❌ Error creating product for part_number=${productData.part_number}: ${error.message}`
+          `[create-missing-products] ❌ Error creating product for part_number=${productData.part_number}: ` +
+            `status=${status || "n/a"}, ` +
+            `message=${data?.message || error.message}, ` +
+            `data=${JSON.stringify(data || {}, null, 2)}`
         );
       }
     }
@@ -391,3 +397,35 @@ const processMissingProducts = async (fileKey) => {
 };
 
 module.exports = { processMissingProducts };
+
+// If this file is run directly via `node create-missing-products.js ...`
+if (require.main === module) {
+  const fileKey = process.argv[2];
+
+  if (!fileKey) {
+    console.error(
+      "[create-missing-products] ❌ Usage: node create-missing-products.js <missing_products_file.json>"
+    );
+    process.exit(1);
+  }
+
+  (async () => {
+    try {
+      console.log(
+        `[create-missing-products] ▶︎ Starting processMissingProducts("${fileKey}")...`
+      );
+      await processMissingProducts(fileKey);
+      console.log(
+        `[create-missing-products] ✅ Finished processMissingProducts("${fileKey}")`
+      );
+      process.exit(0);
+    } catch (err) {
+      console.error(
+        `[create-missing-products] ❌ Uncaught error in CLI runner:`,
+        err
+      );
+      process.exit(1);
+    }
+  })();
+}
+
