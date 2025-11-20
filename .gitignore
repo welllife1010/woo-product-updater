@@ -7,7 +7,9 @@ output-files/
 test/
 input-json/
 output-csv/
+old-files/
 batch_status/
+missing-products/
 missing_products_*/
 file-structure-ref/
 

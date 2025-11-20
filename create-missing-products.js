@@ -1,228 +1,110 @@
 /**
  * create-missing-products.js
  *
- * PURPOSE:
- *   - Read "missing product" JSON files produced by the updater.
- *   - For each missing product:
- *       1) Build a WooCommerce "create product" payload
- *       2) Derive a category hierarchy from productData.category
- *          (using fuzzy resolve + fallback to ">" split)
- *       3) Ensure those categories exist in WooCommerce (create if needed)
- *       4) Assign the new product to those categories
+ * PURPOSE (high-level overview):
+ * --------------------------------
+ * During a normal CSV update run, some rows cannot be matched to existing
+ * WooCommerce products (for example: a part number doesn't exist yet).
+ *
+ * Those rows are captured as "missing products" and written to JSON files.
+ *
+ * This script:
+ *   1) Reads those "missing" JSON files.
+ *   2) For each missing product row:
+ *        - Figures out which category hierarchy it should belong to
+ *          (using fuzzy category resolution).
+ *        - Ensures those categories exist in WooCommerce (create if needed).
+ *        - Builds a WooCommerce "create product" payload.
+ *        - Calls the WooCommerce REST API to create the product.
+ *   3) Logs success or failure for each product.
+ *
+ * Typical usage (from CLI):
+ *
+ *   node create-missing-products.js <categorySlug> <fileKey>
+ *
+ * Example:
+ *   node create-missing-products.js microcontrollers product-microcontrollers-03112025_part4.csv
+ *
+ *   - categorySlug:
+ *       The LEAF category slug (e.g. "microcontrollers") used in the folder name.
+ *   - fileKey:
+ *       The original CSV filename (or S3 key) used in the batch, e.g.:
+ *         "product-microcontrollers-03112025_part4.csv"
  */
 
-const fs = require("fs")
-const path = require("path")
+const fs = require("fs");
+const path = require("path");
 
-const { wooApi } = require("./woo-helpers")
-const { logInfoToFile, logErrorToFile } = require("./logger")
-const { resolveCategory } = require("./category-map")
+const { wooApi } = require("./woo-helpers");
+const { logInfoToFile, logErrorToFile } = require("./logger");
 
-const EXECUTION_MODE = process.env.EXECUTION_MODE || "production"
+// Smart category resolver:
+// - First tries fuzzy match against EXISTING Woo categories.
+// - If nothing found, falls back to CSV + fuzzy via category-map.js.
+const { resolveCategorySmart } = require("./category-resolver");
+
+// Shared category creation helpers (canonical implementation):
+// - ensureCategoryHierarchyIds({ main, sub, sub2 }) → [id1, id2, id3?]
+const { ensureCategoryHierarchyIds } = require("./category-woo");
+
+// Optional: execution mode (can be used later to skip "create" calls in tests)
+const EXECUTION_MODE = process.env.EXECUTION_MODE || "production";
 
 /**
- * @function getCleanFileKey
- * @description
- *   Normalize a CSV key / file path into a simple base name without extension.
- *   This ensures we use a safe, consistent value when building the
- *   missing-products JSON filename.
+ * getCleanFileKey(fileKey)
  *
- *   Examples:
- *     - "product-microcontrollers-03112025_part4.csv"
- *         → "product-microcontrollers-03112025_part4"
- *     - "vendor-x/ics/microcontrollers-part2.csv"
- *         → "microcontrollers-part2"
+ * GOAL:
+ *   Normalize any kind of "file key" (local filename or S3 key) into a simple
+ *   base name without extension. This is used to build a predictable JSON
+ *   filename for the missing products file.
  *
- * @param {string} fileKey
- *   The original CSV key / path used when processing the batch.
+ * EXAMPLES:
+ *   - "product-microcontrollers-03112025_part4.csv"
+ *       → "product-microcontrollers-03112025_part4"
  *
- * @returns {string}
- *   Base name of the file without the trailing extension.
+ *   - "vendor-x/ics/microcontrollers-part2.csv"
+ *       → "microcontrollers-part2"
+ *
+ *   - "LED-Emitters-IR-UV-Visible.csv"
+ *       → "LED-Emitters-IR-UV-Visible"
+ *
+ * HOW:
+ *   - path.basename() removes folder prefixes.
+ *   - regex replaces the final ".something" with "".
  */
 function getCleanFileKey(fileKey) {
-  const base = path.basename(fileKey);       // drop any folder prefix
-  return base.replace(/\.[^.]+$/, "");       // drop last extension
-}
-
-// -----------------------------------------------------------------------------
-// Small helper: normalize a category name for comparison
-// -----------------------------------------------------------------------------
-function normalizeName(value) {
-  if (!value) return ""
-
-  return String(value)
-    .replace(/\u00A0/g, " ") // non-breaking spaces → normal space
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ") // collapse multiple spaces
-}
-
-// -----------------------------------------------------------------------------
-// In-memory cache of Woo product categories
-// Each item: { id, name, parent, slug, ... }
-// -----------------------------------------------------------------------------
-let CATEGORY_CACHE = null
-
-/**
- * Load all WooCommerce product categories once, cache for this process.
- * This avoids repeated API calls when creating many missing products.
- */
-async function loadAllCategories() {
-  if (CATEGORY_CACHE) return CATEGORY_CACHE
-
-  const categories = []
-  let page = 1
-  const per_page = 100
-
-  while (true) {
-    try {
-      const res = await wooApi.get("products/categories", {
-        per_page,
-        page,
-      })
-
-      const data = res.data || []
-      if (!data.length) break
-
-      categories.push(...data)
-
-      if (data.length < per_page) break // last page
-      page++
-    } catch (err) {
-      logErrorToFile(
-        `[create-missing-products] ❌ Failed to load categories (page=${page}): ${err.message}`
-      )
-      break
-    }
-  }
-
-  CATEGORY_CACHE = categories
-  logInfoToFile(
-    `[create-missing-products] ✅ Loaded ${categories.length} existing product categories from WooCommerce`
-  )
-  return CATEGORY_CACHE
+  const base = path.basename(fileKey);  // "folder/file.csv" → "file.csv"
+  return base.replace(/\.[^.]+$/, "");  // remove last extension (".csv")
 }
 
 /**
- * Find a category in the cached list by name + parent.
+ * parseCategoryPath(rawCategory)
  *
- * @param {string} name       - category name to search
- * @param {number} parentId   - parent category ID (0 for root)
- * @returns {Object|null}     - the category object or null
- */
-async function findCategoryByNameAndParent(name, parentId) {
-  const all = await loadAllCategories()
-  const targetNorm = normalizeName(name)
-
-  return (
-    all.find(
-      (cat) =>
-        normalizeName(cat.name) === targetNorm &&
-        Number(cat.parent) === Number(parentId)
-    ) || null
-  )
-}
-
-/**
- * Ensure a single category exists in WooCommerce.
- *  - If found by name+parent → return existing ID.
- *  - Else → create via Woo API, cache, and return new ID.
+ * PURPOSE:
+ *   Fallback parser when fuzzy resolution fails.
+ *   Takes a raw category string like:
+ *     "Integrated Circuits (ICs)>Embedded>Microcontrollers"
  *
- * @param {string} name
- * @param {number} parentId
- * @returns {Promise<number|null>} categoryId
- */
-async function ensureCategory(name, parentId = 0) {
-  if (!name) return null
-
-  // 1) Try to find an existing category
-  const existing = await findCategoryByNameAndParent(name, parentId)
-  if (existing) {
-    return existing.id
-  }
-
-  // 2) Create new category
-  try {
-    const res = await wooApi.post("products/categories", {
-      name,
-      parent: parentId || 0,
-    })
-
-    const created = res.data
-    logInfoToFile(
-      `[create-missing-products] ✅ Created category "${name}" (id=${created.id}, parent=${parentId})`
-    )
-
-    // push into cache so subsequent lookups see it
-    if (CATEGORY_CACHE) {
-      CATEGORY_CACHE.push(created)
-    } else {
-      CATEGORY_CACHE = [created]
-    }
-
-    return created.id
-  } catch (err) {
-    logErrorToFile(
-      `[create-missing-products] ❌ Failed to create category "${name}" (parent=${parentId}): ${err.message}`
-    )
-    return null
-  }
-}
-
-/**
- * Given a "resolvedCategory" object (from resolveCategory or manual parsing),
- * ensure the whole hierarchy exists and return an array of category IDs
- * in order from top → lowest level.
+ *   and turns it into:
+ *     {
+ *       main: "Integrated Circuits (ICs)",
+ *       sub:  "Embedded",
+ *       sub2: "Microcontrollers",
+ *       score: 1,
+ *       matchedOn: "sub2"   // we treat this as "full path provided"
+ *     }
  *
- * resolvedCategory = {
- *   main: "Integrated Circuits (ICs)",
- *   sub: "Embedded",
- *   sub2: "Microcontrollers",
- *   score: <optional>,
- *   matchedOn: <optional>
- * }
- */
-async function ensureCategoryHierarchy(resolvedCategory) {
-  if (!resolvedCategory) return []
-
-  const { main, sub, sub2 } = resolvedCategory
-
-  const ids = []
-
-  // Main
-  const mainId = await ensureCategory(main, 0)
-  if (mainId) ids.push(mainId)
-
-  // Sub (child of main)
-  let subId = null
-  if (sub && mainId) {
-    subId = await ensureCategory(sub, mainId)
-    if (subId) ids.push(subId)
-  }
-
-  // 2nd sub (child of sub)
-  if (sub2 && subId) {
-    const sub2Id = await ensureCategory(sub2, subId)
-    if (sub2Id) ids.push(sub2Id)
-  }
-
-  return ids
-}
-
-/**
- * Parse a raw category string like:
- *   "Integrated Circuits (ICs)>Embedded>Microcontrollers"
- * into an object { main, sub, sub2 }.
+ *   If there are fewer than 3 parts, the missing ones become null.
  */
 function parseCategoryPath(rawCategory) {
-  if (!rawCategory) return null
+  if (!rawCategory) return null;
 
   const parts = String(rawCategory)
     .split(">")
     .map((p) => p.trim())
-    .filter(Boolean)
+    .filter(Boolean);
 
-  if (!parts.length) return null
+  if (!parts.length) return null;
 
   return {
     main: parts[0] || null,
@@ -231,185 +113,191 @@ function parseCategoryPath(rawCategory) {
     score: 1,
     matchedOn:
       parts.length === 1 ? "main" : parts.length === 2 ? "sub" : "sub2",
-  }
+  };
 }
 
 /**
- * Build a human-readable path from a resolvedCategory object.
- * e.g. { main: "ICs", sub: "Embedded", sub2: "MCUs" }
- *   → "ICs > Embedded > MCUs"
+ * buildCategoryPath(resolvedCategory)
+ *
+ * PURPOSE:
+ *   Build a human-readable string from a resolved category object.
+ *
+ * EXAMPLE:
+ *   input: { main: "ICs", sub: "Embedded", sub2: "MCUs" }
+ *   output: "ICs > Embedded > MCUs"
+ *
+ * Used primarily for logging and debugging.
  */
 function buildCategoryPath(resolvedCategory) {
-  if (!resolvedCategory) return ""
+  if (!resolvedCategory) return "";
 
   const parts = [
     resolvedCategory.main,
     resolvedCategory.sub,
     resolvedCategory.sub2,
-  ].filter(Boolean)
-  return parts.join(" > ")
+  ].filter(Boolean);
+
+  return parts.join(" > ");
 }
 
 /**
- * @function processMissingProducts
- * @description
- *   Main entry point for the "create missing products" workflow.
+ * processMissingProducts(categorySlug, fileKey)
  *
- *   This function:
- *     1) Reads a JSON file containing rows that were captured as "missing"
- *        during the main CSV updater run (via recordMissingProduct()).
- *     2) For each missing row:
- *          - Resolves a category hierarchy from productData.category
- *            (fuzzy match via category-map.js + fallback ">" split).
- *          - Ensures that category hierarchy exists in WooCommerce
- *            (creating categories if needed).
- *          - Builds a WooCommerce "create product" payload.
- *          - Creates a new product via the Woo REST API, assigning
- *            the resolved category IDs and relevant meta_data.
+ * MAIN ENTRY FUNCTION (for other modules and CLI).
  *
- *   **Where does it read from?**
+ * RESPONSIBILITIES:
+ *   1) Build the path to the missing-products JSON file using categorySlug + fileKey.
+ *   2) Load and parse the JSON file.
+ *   3) For each missing product:
+ *        a. Determine the best category hierarchy:
+ *           - Use resolveCategorySmart() (Woo fuzzy → CSV fuzzy).
+ *           - Fallback to simple "A>B>C" parsing if needed.
+ *        b. Ensure that hierarchy exists in WooCommerce:
+ *           - Calls ensureCategoryHierarchyIds() to get a list of IDs.
+ *        c. Build a WooCommerce "create product" payload.
+ *        d. POST to WooCommerce REST API to actually create the product.
+ *   4) Log results for success and error cases.
  *
- *   It expects missing-products JSON files to be stored using the same
- *   convention as `recordMissingProduct()` in src/batch/io-status.js:
+ * PARAMETERS:
+ *   @param {string} categorySlug
+ *     - The leaf category slug used to store missing-product files by folder.
+ *     - Example: "microcontrollers", "led-emitters-ir-uv-visible", "resistors".
  *
- *     ./missing-products/
- *       missing-[leafCategorySlug]/
- *         missing_products_[cleanFileKey].json
+ *   @param {string} fileKey
+ *     - The original CSV filename or key used in the batch run.
+ *     - Example: "product-microcontrollers-03112025_part4.csv"
+ *                "LED-Emitters-IR-UV-Visible.csv"
  *
- *   where:
- *     - leafCategorySlug:
- *         The slug version of the *leaf category name* from the CSV,
- *         e.g. "Microcontrollers" → "microcontrollers".
- *         This is the most specific category in the path:
- *           "Integrated Circuits (ICs)>Embedded>Microcontrollers"
- *           → leaf = "Microcontrollers" → slug "microcontrollers"
- *
- *     - cleanFileKey:
- *         Base name of the CSV key without extension.
- *         e.g. "product-microcontrollers-03112025_part4.csv"
- *           → "product-microcontrollers-03112025_part4"
- *
- * @param {string} categorySlug
- *   The *leaf category slug* that groups these missing products.
- *   This should match the folder used when recording missing products:
- *     - "microcontrollers"
- *     - "led-emitters-ir-uv-visible"
- *     - "resistors"
- *
- *   It is used to locate the correct subfolder:
- *     ./missing-products/missing-[categorySlug]/
- *
- * @param {string} fileKey
- *   The original CSV key or base name for this batch of missing rows.
- *   Examples:
- *     - "product-microcontrollers-03112025_part4.csv"
- *     - "LED-Emitters-IR-UV-Visible.csv"
- *     - "vendor-x/ics/microcontrollers-part2.csv"
- *
- *   It is normalized via getCleanFileKey() and used to construct the JSON file name:
- *     missing_products_[cleanFileKey].json
- *
- * @returns {Promise<void>}
- *   Resolves when all missing rows for this [categorySlug, fileKey] have been
- *   processed (or skipped on error). Errors are logged via logErrorToFile().
+ * RETURNS:
+ *   @returns {Promise<void>}
+ *     - Resolves when all rows have been processed (or skipped).
+ *     - Errors are logged via logErrorToFile; this function itself
+ *       does not throw in normal flow.
  */
 const processMissingProducts = async (categorySlug, fileKey) => {
   try {
-    const cleanFileKey = getCleanFileKey(fileKey)
+    // -------------------------------------------------------------------------
+    // 1) Locate the JSON file for this categorySlug + fileKey
+    // -------------------------------------------------------------------------
+    const cleanFileKey = getCleanFileKey(fileKey);
 
     const missingFilePath = path.join(
       __dirname,
       "missing-products",
-      `missing-${categorySlug}`,
-      `missing_products_${cleanFileKey}.json`
-    )
+      `missing-${categorySlug}`,              // e.g. "missing-microcontrollers"
+      `missing_products_${cleanFileKey}.json` // e.g. "missing_products_product-microcontrollers-03112025_part4.json"
+    );
 
+    // If there is no JSON file, there is simply nothing to do.
     if (!fs.existsSync(missingFilePath)) {
       logInfoToFile(
         `[create-missing-products] No missing products file found for ${fileKey}, skipping.`
-      )
-      return
+      );
+      return;
     }
 
-    let missingProducts = []
+    // -------------------------------------------------------------------------
+    // 2) Load and parse the JSON file
+    // -------------------------------------------------------------------------
+    let missingProducts = [];
     try {
-      missingProducts = JSON.parse(fs.readFileSync(missingFilePath, "utf8"))
+      const rawJson = fs.readFileSync(missingFilePath, "utf8");
+      missingProducts = JSON.parse(rawJson);
     } catch (err) {
       logErrorToFile(
-        `[create-missing-products] ❌ Error reading missing products file: ${err.message}`
-      )
-      return
+        `[create-missing-products] ❌ Error reading missing products file "${missingFilePath}": ${err.message}`
+      );
+      return;
     }
 
     logInfoToFile(
       `[create-missing-products] 🚀 Processing ${missingProducts.length} missing products from ${missingFilePath}`
-    )
+    );
 
-    // Ensure category cache is loaded before the loop
-    await loadAllCategories()
-
+    // -------------------------------------------------------------------------
+    // 3) Loop through each missing product row
+    // -------------------------------------------------------------------------
     for (const productData of missingProducts) {
       try {
-        const partNumber = productData.part_number || ""
-        const manufacturer = productData.manufacturer || ""
-        const rawCategory = productData.category || productData.Category || "" // support both cases
+        const partNumber = productData.part_number || "";
+        const manufacturer = productData.manufacturer || "";
+        const rawCategory =
+          productData.category || productData.Category || ""; // allow both cases
 
-        // -------------------------------------------------
-        // 1) Derive a resolved category (fuzzy + fallback)
-        // -------------------------------------------------
-        let resolvedCategory = null
+        // ---------------------------------------------------------------
+        // 3a) Resolve category hierarchy (smart fuzzy + fallback)
+        // ---------------------------------------------------------------
+        let resolvedCategory = null;
 
         if (rawCategory) {
           try {
-            // Try fuzzy match using category-hierarchy-ref.csv
-            resolvedCategory = await resolveCategory(rawCategory)
+            // Smart category resolution:
+            //   1) fuzzy match against existing Woo categories (website as truth)
+            //   2) if not found, fuzzy against category-hierarchy-ref.csv
+            resolvedCategory = await resolveCategorySmart(rawCategory);
           } catch (err) {
             logErrorToFile(
               `[create-missing-products] Category resolve error for part_number=${partNumber}: ${err.message}`
-            )
+            );
           }
 
-          // Fallback: if fuzzy failed, use raw ">" path directly
+          // Fallback: if the smart resolver couldn't find anything,
+          // try interpreting the raw string as a "A>B>C" path.
           if (!resolvedCategory) {
-            resolvedCategory = parseCategoryPath(rawCategory)
+            resolvedCategory = parseCategoryPath(rawCategory);
           }
 
           if (resolvedCategory) {
-            const pathStr = buildCategoryPath(resolvedCategory)
+            const pathStr = buildCategoryPath(resolvedCategory);
             logInfoToFile(
-              `[create-missing-products] Category for part_number=${partNumber}: "${rawCategory}" → "${pathStr}" (matchedOn=${
-                resolvedCategory.matchedOn || "n/a"
-              })`
-            )
+              `[create-missing-products] Category for part_number=${partNumber}: ` +
+                `"${rawCategory}" → "${pathStr}" ` +
+                `(matchedOn=${resolvedCategory.matchedOn || "n/a"})`
+            );
           } else {
             logInfoToFile(
               `[create-missing-products] No category could be resolved for part_number=${partNumber}, rawCategory="${rawCategory}"`
-            )
+            );
           }
         } else {
           logInfoToFile(
             `[create-missing-products] No category field present for part_number=${partNumber}`
-          )
+          );
         }
 
-        // -------------------------------------------------
-        // 2) Ensure category hierarchy exists in Woo
-        // -------------------------------------------------
-        let categoryIds = []
+        // ---------------------------------------------------------------
+        // 3b) Ensure those categories exist in WooCommerce
+        // ---------------------------------------------------------------
+        let categoryIds = [];
         if (resolvedCategory) {
-          categoryIds = await ensureCategoryHierarchy(resolvedCategory)
+          // This calls into the shared category-woo.js helper.
+          // It will:
+          //   - find or create main/sub/sub2
+          //   - return an array of IDs in hierarchical order.
+          categoryIds = await ensureCategoryHierarchyIds(resolvedCategory);
         }
 
-        // -------------------------------------------------
-        // 3) Build the new product payload
-        //    (you can expand meta_data mappings over time)
-        // -------------------------------------------------
+        // ---------------------------------------------------------------
+        // 3c) Build the WooCommerce "create product" payload
+        // ---------------------------------------------------------------
         const newProduct = {
+          // Human-friendly product title:
+          //   - use part_title if available
+          //   - otherwise fall back to part_number
           name: productData.part_title || productData.part_number,
-          sku: productData.sku || productData.part_number,
-          description: productData.part_description || "",
-          categories: categoryIds.map((id) => ({ id })), // attach category IDs
 
+          // SKU:
+          //   - if vendor provides a dedicated 'sku', use that
+          //   - else use part_number as SKU
+          sku: productData.sku || productData.part_number,
+
+          // Long description (HTML is okay here, Woo handles it)
+          description: productData.part_description || "",
+
+          // Category assignment: list of { id }
+          categories: categoryIds.map((id) => ({ id })),
+
+          // Custom fields (stored as meta_data for ACF or other custom logic)
           meta_data: [
             { key: "manufacturer", value: manufacturer },
 
@@ -440,11 +328,11 @@ const processMissingProducts = async (categorySlug, fileKey) => {
               value: productData.additional_info || "",
             },
           ],
-        }
+        };
 
-        // Optionally also store the *proposed* category path as meta for debugging
+        // Optional: also store the resolved category path as meta for debugging
         if (resolvedCategory) {
-          const pathStr = buildCategoryPath(resolvedCategory)
+          const pathStr = buildCategoryPath(resolvedCategory);
           newProduct.meta_data.push(
             {
               key: "proposed_category_main",
@@ -462,71 +350,90 @@ const processMissingProducts = async (categorySlug, fileKey) => {
               key: "proposed_category_path",
               value: pathStr,
             }
-          )
+          );
         }
 
-        // -------------------------------------------------
-        // 4) Create the product via Woo API
-        // -------------------------------------------------
-        const response = await wooApi.post("products", newProduct)
+        // ---------------------------------------------------------------
+        // 3d) Actually create the product in WooCommerce
+        // ---------------------------------------------------------------
+        if (EXECUTION_MODE === "test") {
+          // In test mode, we can log the payload instead of creating real products.
+          logInfoToFile(
+            `[create-missing-products] (TEST MODE) Would create product part_number=${partNumber} with categories: [${categoryIds.join(
+              ", "
+            )}]`
+          );
+          continue; // skip the actual API call
+        }
+
+        const response = await wooApi.post("products", newProduct);
 
         logInfoToFile(
           `[create-missing-products] ✅ Created product part_number=${partNumber} (id=${
             response.data.id
           }) with categories: [${categoryIds.join(", ")}]`
-        )
+        );
       } catch (error) {
-        const status = error.response?.status
-        const data = error.response?.data
+        // Handle errors that occur *for this single product*
+        const status = error.response?.status;
+        const data = error.response?.data;
 
         logErrorToFile(
-          `[create-missing-products] ❌ Error creating product for part_number=${productData.part_number}: ` +
-            `status=${status || "n/a"}, ` +
-            `message=${data?.message || error.message}, ` +
-            `data=${JSON.stringify(data || {}, null, 2)}`
-        )
+          `[create-missing-products] ❌ Error creating product for part_number=${
+            productData.part_number
+          }: status=${status || "n/a"}, message=${
+            data?.message || error.message
+          }, data=${JSON.stringify(data || {}, null, 2)}`
+        );
       }
     }
   } catch (outerErr) {
+    // Catch any fatal errors (e.g. file-level problems)
     logErrorToFile(
       `[create-missing-products] ❌ Fatal error in processMissingProducts(${fileKey}): ${outerErr.message}`
-    )
+    );
   }
-}
+};
 
-module.exports = { processMissingProducts }
+module.exports = { processMissingProducts };
 
-// If this file is run directly via `node create-missing-products.js ...`
+/**
+ * If this file is run directly via:
+ *
+ *   node create-missing-products.js <categorySlug> <fileKey>
+ *
+ * It will call processMissingProducts() with those arguments.
+ */
 if (require.main === module) {
-  const categorySlug = process.argv[2] // e.g. "microcontrollers"
-  const fileKey = process.argv[3] // e.g. "product-microcontrollers-03112025_part4.csv"
+  const categorySlug = process.argv[2]; // e.g. "microcontrollers"
+  const fileKey = process.argv[3];      // e.g. "product-microcontrollers-03112025_part4.csv"
 
   if (!categorySlug || !fileKey) {
     console.error(
       "[create-missing-products] ❌ Usage: node create-missing-products.js <categorySlug> <fileKey>"
-    )
+    );
     console.error(
       "Example: node create-missing-products.js microcontrollers product-microcontrollers-03112025_part4.csv"
-    )
-    process.exit(1)
+    );
+    process.exit(1);
   }
 
   (async () => {
     try {
       console.log(
         `[create-missing-products] ▶︎ Starting processMissingProducts("${categorySlug}", "${fileKey}")...`
-      )
-      await processMissingProducts(categorySlug, fileKey)
+      );
+      await processMissingProducts(categorySlug, fileKey);
       console.log(
         `[create-missing-products] ✅ Finished processMissingProducts("${categorySlug}", "${fileKey}")`
-      )
-      process.exit(0)
+      );
+      process.exit(0);
     } catch (err) {
       console.error(
         `[create-missing-products] ❌ Uncaught error in CLI runner:`,
         err
-      )
-      process.exit(1)
+      );
+      process.exit(1);
     }
-  })()
+  })();
 }

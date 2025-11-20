@@ -10,8 +10,8 @@
 // - avoids duplicates (checks by slug + parent)
 // - caches results in-memory during one run so we don't spam the API.
 
-const { wooApi } = require("../../woo-helpers");
-const { logInfoToFile, logErrorToFile } = require("../../logger");
+const { wooApi } = require("../woo-helpers");
+const { logInfoToFile, logErrorToFile } = require("../logger");
 
 // Simple slug generator: "LED Emitters" -> "led-emitters"
 function slugify(name) {
