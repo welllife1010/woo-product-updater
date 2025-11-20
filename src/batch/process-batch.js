@@ -26,7 +26,7 @@ const { recordBatchStatus } = require("./io-status")
 const { resolveCategory } = require("../../category-map");
 
 // Apply category hierarchy to WooCommerce
-const { ensureCategoryHierarchy } = require("./category-apply");
+const { ensureCategoryHierarchy } = require("../../category-woo");
 
 /**
  * Try to extract a "vendor category" hint from a CSV row.
