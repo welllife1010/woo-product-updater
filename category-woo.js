@@ -25,8 +25,8 @@ function slugify(name) {
 }
 
 // Cache so we don't re-fetch or re-create the same category repeatedly.
-// Key: `${parentId}:${slug}` → value: { id, name, slug, parent }
-let categoryCache = []; // in-memory for this process run
+// Key: `${parentId}:${slug}` →  (category object)
+const categoryCache = new Map(); // in-memory for this process run
 
 /**
  * Find an existing WooCommerce product category by slug + parent,
@@ -58,7 +58,7 @@ async function getOrCreateCategory(name, parentId = 0) {
       hide_empty: false,
     };
 
-    const existing = await wooApi.get("products/categories", { params });
+    const existing = await wooApi.get("products/categories", params);
     const data = existing.data || [];
 
     if (data.length > 0) {

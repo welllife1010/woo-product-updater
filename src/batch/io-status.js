@@ -126,7 +126,7 @@ function toSlug(str) {
  *     - "vendor-x/ics/microcontrollers-part2.csv"
  *
  * @param {Object} item
- *   The raw CSV row object for the missing product. Must contain at least:
+ *   The raw CSV row (single row) object for the missing product. Must contain at least:
  *     - item.part_number (for logging)
  *     - item.category or item.Category (optional but recommended) in
  *       the form "Main>Sub>Leaf" so we can derive the leaf category.
