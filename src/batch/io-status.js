@@ -75,120 +75,73 @@ const recordBatchStatus = (fileKey, updatedParts, skippedParts, failedParts) => 
 };
 
 /**
- * @function toSlug
- * @description Turn a name into a URL/file-safe slug.
- *   e.g. "Microcontrollers" → "microcontrollers"
- *        "LED Emitters (IR/UV)" → "led-emitters-ir-uv"
- */
-function toSlug(str) {
-  if (!str) return "unknown";
-  return String(str)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-") // non-alphanumeric → "-"
-    .replace(/^-+|-+$/g, "");    // trim leading/trailing "-"
-}
-
-/**
  * @function recordMissingProduct
  * @description
- *   Persist a full CSV row when we cannot resolve a matching WooCommerce
- *   productId for that row. This is used later by `create-missing-products.js`
- *   to actually create new Woo products for these "missing" items.
+ *   Save a CSV row to a JSON file so we can create this product later.
  *
- *   The row is grouped by:
- *     - its *source CSV file*       → via `fileKey`
- *     - its *leaf category (slug)* → derived from item.category / item.Category
+ *   The caller (fetchProductData) is responsible for figuring out:
+ *     - which leafCategorySlug (Woo-style slug) this row belongs to.
  *
- *   This gives us a clear folder structure for follow-up:
+ *   Grouping:
+ *     ./missing-products/missing-[leafCategorySlug]/missing_products_[cleanFileKey].json
  *
- *     ./missing-products/
- *       missing-[leafCategorySlug]/
- *         missing_products_[cleanFileKey].json
+ *   Example:
+ *     fileKey          = "product-microcontrollers-03112025_part4.csv"
+ *     leafCategorySlug = "microcontrollers"
  *
- *   where:
- *     - leafCategorySlug:
- *         - the last segment of the category path from the CSV row
- *           e.g. "Integrated Circuits (ICs)>Embedded>Microcontrollers"
- *           → leaf name "Microcontrollers"
- *           → slug "microcontrollers"
- *
- *     - cleanFileKey:
- *         - `fileKey` with the trailing ".csv" removed
- *         - e.g. "product-microcontrollers-03112025_part4.csv"
- *           → "product-microcontrollers-03112025_part4"
+ *     → folder:
+ *         ./missing-products/missing-microcontrollers/
+ *       file:
+ *         missing_products_product-microcontrollers-03112025_part4.json
  *
  * @param {string} fileKey
- *   The original CSV key / file identifier for this batch.
- *   Examples:
- *     - "LED-Emitters-IR-UV-Visible.csv"
- *     - "product-microcontrollers-03112025_part4.csv"
- *     - "vendor-x/ics/microcontrollers-part2.csv"
+ *   CSV identifier (often the filename).
  *
  * @param {Object} item
- *   The raw CSV row (single row) object for the missing product. Must contain at least:
- *     - item.part_number (for logging)
- *     - item.category or item.Category (optional but recommended) in
- *       the form "Main>Sub>Leaf" so we can derive the leaf category.
+ *   The raw CSV row object.
  *
- * @effects
- *   - Ensures the folder:
- *       ./missing-products/missing-[leafCategorySlug]/
- *   - Appends `item` into:
- *       ./missing-products/missing-[leafCategorySlug]/missing_products_[cleanFileKey].json
- *   - Creates directories and files as needed.
- *
- * @failure
- *   - Never throws to the caller; logs any I/O problems via logErrorToFile().
+ * @param {string} [leafCategorySlug="unknown"]
+ *   The Woo-like leaf category slug decided by category-resolver.
  */
-const recordMissingProduct = (fileKey, item) => {
+const recordMissingProduct = (
+  fileKey,
+  item,
+  leafCategorySlug = "unknown"
+) => {
   try {
-    // 1) Clean the fileKey (drop .csv so we can reuse the base name)
+    // 1) Drop the ".csv" extension so we can reuse the base filename.
     const cleanFileKey = fileKey.replace(/\.csv$/i, "");
 
-    // 2) Derive the leaf category slug from the CSV row, if possible.
-    //    Example:
-    //      item.category = "Integrated Circuits (ICs)>Embedded>Microcontrollers"
-    //      → parts = ["Integrated Circuits (ICs)", "Embedded", "Microcontrollers"]
-    //      → leaf name = "Microcontrollers"
-    //      → leafCategorySlug = "microcontrollers"
-    const rawCategory = item.category || item.Category || "";
-    let leafCategorySlug = "unknown";
+    // 2) Make sure slug is safe to use in a folder name.
+    //    (If resolver gave us "", fall back to "unknown".)
+    const safeSlug = leafCategorySlug || "unknown";
 
-    if (rawCategory) {
-      const parts = String(rawCategory)
-        .split(">")
-        .map((p) => p.trim())
-        .filter(Boolean);
-
-      if (parts.length) {
-        const leafName = parts[parts.length - 1]; // last segment = leaf category
-        leafCategorySlug = toSlug(leafName);
-      }
-    }
-
-    // 3) Build the folder + file path:
-    //    ./missing-products/missing-[leafCategorySlug]/missing_products_[cleanFileKey].json
+    // 3) Build:
+    //      ./missing-products/missing-[safeSlug]/
     const missingDir = path.join(
       __dirname,
       "../../missing-products",
-      `missing-${leafCategorySlug}`
+      `missing-${safeSlug}`
     );
 
     if (!fs.existsSync(missingDir)) {
       fs.mkdirSync(missingDir, { recursive: true });
     }
 
+    // 4) JSON file inside that folder:
+    //      missing_products_[cleanFileKey].json
     const missingFilePath = path.join(
       missingDir,
       `missing_products_${cleanFileKey}.json`
     );
 
-    // 4) Read any existing missing-products array for this [categorySlug, fileKey]
+    // 5) Load existing array if the file is already there.
     let missingProducts = [];
     if (fs.existsSync(missingFilePath)) {
       try {
-        missingProducts = JSON.parse(fs.readFileSync(missingFilePath, "utf8"));
+        missingProducts = JSON.parse(
+          fs.readFileSync(missingFilePath, "utf8")
+        );
       } catch (err) {
         logErrorToFile(
           `Error reading missing products file at ${missingFilePath}: ${err.message}`
@@ -196,11 +149,14 @@ const recordMissingProduct = (fileKey, item) => {
       }
     }
 
-    // 5) Append the current CSV row to the list
+    // 6) Append the current row.
     missingProducts.push(item);
 
-    // 6) Write the updated array back to disk
-    fs.writeFileSync(missingFilePath, JSON.stringify(missingProducts, null, 2));
+    // 7) Write it back to disk (pretty-printed for debugging).
+    fs.writeFileSync(
+      missingFilePath,
+      JSON.stringify(missingProducts, null, 2)
+    );
 
     logInfoToFile(
       `Recorded missing product for part_number=${item.part_number} in file ${missingFilePath}`
