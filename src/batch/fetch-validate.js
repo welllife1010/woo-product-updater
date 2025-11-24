@@ -25,6 +25,7 @@ const { resolveLeafSlugSmart } = require("../../category-resolver");
 
 // Our local helper for writing missing-product JSON files
 const { recordMissingProduct } = require("./io-status");
+const { normalizeManufacturerName } = require("./manufacturer-map");
 
 /**
  * @function fetchProductData
@@ -67,9 +68,13 @@ async function fetchProductData(
 ) {
   // STEP 1: Try to find the Woo productId using part_number + manufacturer.
   //   - This is your "identity" lookup.
+
+  const rawManufacturer = item.manufacturer || "";
+  const normalizedManufacturer = normalizeManufacturerName(rawManufacturer);
+
   const productId = await getProductIdByPartNumber(
     item.part_number,
-    item.manufacturer?.trim() || "",
+    normalizedManufacturer,
     currentIndex,
     totalProductsInFile,
     fileKey
