@@ -43,6 +43,8 @@ const { logInfoToFile, logErrorToFile } = require("./logger");
 // - If nothing found, falls back to CSV + fuzzy via category-map.js.
 const { resolveCategorySmart } = require("./category-resolver");
 
+const { resolveManufacturerSmart } = require("./manufacturer-resolver");
+
 // Shared category creation helpers (canonical implementation):
 // - ensureCategoryHierarchyIds({ main, sub, sub2 }) → [id1, id2, id3?]
 const { ensureCategoryHierarchyIds } = require("./category-woo");
@@ -220,7 +222,11 @@ const processMissingProducts = async (categorySlug, fileKey) => {
     for (const productData of missingProducts) {
       try {
         const partNumber = productData.part_number || "";
-        const manufacturer = productData.manufacturer || "";
+        const rawManufacturer =
+          productData.manufacturer || productData.Manufacturer || "";
+        const manufacturerResolved = resolveManufacturerSmart(rawManufacturer);
+        const canonicalManufacturer =
+          manufacturerResolved?.canonical || rawManufacturer || "";
         const rawCategory =
           productData.category || productData.Category || ""; // allow both cases
 
@@ -299,7 +305,7 @@ const processMissingProducts = async (categorySlug, fileKey) => {
 
           // Custom fields (stored as meta_data for ACF or other custom logic)
           meta_data: [
-            { key: "manufacturer", value: manufacturer },
+            { key: "manufacturer", value: canonicalManufacturer },
 
             // Keep existing database-style fields as ACF meta
             { key: "series", value: productData.series || "" },

@@ -1,4 +1,5 @@
 # folders
+archive/
 reference/
 old/
 csvFiles/
@@ -12,6 +13,7 @@ batch_status/
 missing-products/
 missing_products_*/
 file-structure-ref/
+
 
 # database files
 dump.rdb

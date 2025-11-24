@@ -25,7 +25,9 @@ const { resolveLeafSlugSmart } = require("../../category-resolver");
 
 // Our local helper for writing missing-product JSON files
 const { recordMissingProduct } = require("./io-status");
-const { normalizeManufacturerName } = require("./manufacturer-map");
+
+// Smart manufacturer resolver: aliases + fuzzy + auto-append new
+const { resolveManufacturerSmart } = require("../../manufacturer-resolver");
 
 /**
  * @function fetchProductData
@@ -66,21 +68,22 @@ async function fetchProductData(
   totalProductsInFile,
   fileKey
 ) {
-  // STEP 1: Try to find the Woo productId using part_number + manufacturer.
-  //   - This is your "identity" lookup.
+  // STEP 1: Resolve manufacturer to a canonical name
+  const rawManufacturer = item.manufacturer || item.Manufacturer || "";
+  const manufacturerResolved = resolveManufacturerSmart(rawManufacturer);
+  const canonicalManufacturer =
+    manufacturerResolved?.canonical || rawManufacturer || "";
 
-  const rawManufacturer = item.manufacturer || "";
-  const normalizedManufacturer = normalizeManufacturerName(rawManufacturer);
-
+  // STEP 2: Try to find the Woo productId using part_number + canonical manufacturer
   const productId = await getProductIdByPartNumber(
     item.part_number,
-    normalizedManufacturer,
+    canonicalManufacturer.trim(),
     currentIndex,
     totalProductsInFile,
     fileKey
   );
 
-  // STEP 2: If we couldn't find a productId, treat this row as "missing".
+  // STEP 3: If we couldn't find a productId, treat this row as "missing".
   if (!productId) {
     // 2a. Grab the raw category text from the row (if present).
     //     Examples:
@@ -108,7 +111,7 @@ async function fetchProductData(
     } catch (err) {
       // If something goes wrong, we still don't want to break batching.
       logErrorToFile(
-        `resolveLeafSlugSmart failed for category="${rawCategory}": ${err.message}`
+        `[fetchProductData] resolveLeafSlugSmart failed for category="${rawCategory}": ${err.message}`
       );
     }
 
@@ -132,7 +135,7 @@ async function fetchProductData(
     return { productId: null, currentData: null };
   }
 
-  // STEP 3: If we DID find a productId, fetch the product from Woo.
+  // STEP 4: productId found → fetch current Woo product payload.
   const currentData = await getProductById(productId, fileKey, currentIndex);
   if (!currentData) {
     logErrorToFile(
