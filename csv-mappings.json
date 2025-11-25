@@ -1,0 +1,22 @@
+{
+  "files": [
+    {
+      "fileKey": "ui-uploads/20250312/LED-Emitters-IR-UV-Visible.csv",
+      "status": "ready",
+      "headers": ["Part #", "Category", "Manufacturer", "Price", "Qty"],
+      "mapping": {
+        "partNumber": "Part #",
+        "category": "Category",
+        "manufacturer": "Manufacturer"
+      },
+      "uploadedAt": "2025-03-12T10:23:45.123Z"
+    },
+    {
+      "fileKey": "ui-uploads/20250312/vendorX-mcus.csv",
+      "status": "pending",
+      "headers": ["part_num", "cat", "mfr_name"],
+      "mapping": null,
+      "uploadedAt": "2025-03-12T10:30:00.000Z"
+    }
+  ]
+}

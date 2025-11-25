@@ -111,7 +111,7 @@ async function fetchProductData(
     } catch (err) {
       // If something goes wrong, we still don't want to break batching.
       logErrorToFile(
-        `[fetchProductData] resolveLeafSlugSmart failed for category="${rawCategory}": ${err.message}`
+        `[fetchProductData] resolveLeafSlugSmart failed for part_number=${item.part_number}, category="${rawCategory}": ${err.message}`
       );
     }
 
@@ -157,6 +157,10 @@ async function fetchProductData(
  *     - part_number
  *     - manufacturer
  *
+ *   verifies that the resolved Woo product still matches the CSV row
+ *   for part_number and manufacturer, using the same canonical
+ *   manufacturer resolver as fetchProductData().
+ * 
  *   This prevents us from accidentally updating the WRONG product id
  *   if something weird happened in the lookup logic.
  *
@@ -165,29 +169,40 @@ async function fetchProductData(
  *   - false → skip this row for safety
  */
 function validateProductMatch(item, currentData, _productId, _fileKey) {
-  // 1) Try to get "part_number" and "manufacturer" from meta_data.
+  // 1) Part number from Woo
   let currentPartNumber =
     currentData.meta_data.find(
       (m) => m.key.toLowerCase() === "part_number"
     )?.value?.trim() || "";
-  let currentManufacturer =
-    currentData.meta_data.find(
-      (m) => m.key.toLowerCase() === "manufacturer"
-    )?.value?.trim() || "";
 
-  // 2) Some catalogs store part_number in the product name instead.
-  //    If meta_data doesn't have it, use the name as a fallback.
+  // Fallback: some catalogs store part_number in the product name instead.
   if (!currentPartNumber) {
     currentPartNumber = currentData.name?.trim() || "";
   }
 
-  // 3) If either part_number or manufacturer do NOT match, we skip.
-  if (
-    item.part_number !== currentPartNumber ||
-    item.manufacturer !== currentManufacturer
-  ) {
+  // 2) Manufacturer from Woo
+  let currentManufacturerRaw =
+    currentData.meta_data.find(
+      (m) => m.key.toLowerCase() === "manufacturer"
+    )?.value?.trim() || "";
+
+  // 3) Manufacturer from CSV
+  const csvManufacturerRaw = item.manufacturer || item.Manufacturer || "";
+
+  // 4) Resolve both to canonical manufacturer names
+  const csvResolved = resolveManufacturerSmart(csvManufacturerRaw);
+  const wooResolved = resolveManufacturerSmart(currentManufacturerRaw);
+
+  const csvCanonical = csvResolved?.canonical || csvManufacturerRaw || "";
+  const wooCanonical = wooResolved?.canonical || currentManufacturerRaw || "";
+
+  // 5) Compare part_number (exact) and canonical manufacturer
+  const partMatch = item.part_number === currentPartNumber;
+  const manufacturerMatch = csvCanonical === wooCanonical;
+
+  if (!partMatch || !manufacturerMatch) {
     logInfoToFile(
-      `"processBatch()" - Skipping update for part_number=${item.part_number}: WooCommerce data mismatch.`
+      `"processBatch()" - Skipping update for part_number=${item.part_number}: mismatch (CSV part="${item.part_number}", Woo part="${currentPartNumber}", CSV mfr="${csvCanonical}", Woo mfr="${wooCanonical}").`
     );
     return false;
   }

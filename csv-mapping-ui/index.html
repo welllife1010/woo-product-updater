@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>CSV Column Mapping</title>
+    <style>
+      body { font-family: sans-serif; padding: 16px; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 24px; }
+      th, td { border: 1px solid #ddd; padding: 8px; }
+      th { background: #f0f0f0; }
+      .badge { padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+      .badge.pending { background: #ffeb3b; }
+      .badge.ready { background: #8bc34a; color: #fff; }
+      .mapping-form { border: 1px solid #ddd; padding: 12px; margin-top: 16px; }
+      .upload-form { border: 1px solid #ddd; padding: 12px; margin-bottom: 24px; }
+      label { display: inline-block; width: 200px; }
+    </style>
+  </head>
+  <body>
+    <h1>CSV Column Mapping & Upload</h1>
+
+    <!-- Upload CSV -->
+    <div class="upload-form">
+      <h2>Upload a CSV</h2>
+      <form id="upload-form">
+        <div style="margin-bottom: 8px;">
+          <label for="file">CSV file:</label>
+          <input type="file" id="file" name="file" accept=".csv" required />
+        </div>
+        <div style="margin-bottom: 8px;">
+          <label for="folder">S3 folder (optional):</label>
+          <input
+            type="text"
+            id="folder"
+            name="folder"
+            placeholder="e.g. 20250312/ or ui-uploads/20250312/"
+          />
+        </div>
+        <button type="submit">Upload to S3 & Register</button>
+      </form>
+      <p id="upload-status"></p>
+    </div>
+
+    <!-- List of files -->
+    <h2>Files</h2>
+    <table id="files-table">
+      <thead>
+        <tr>
+          <th>File Key</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="files-body"></tbody>
+    </table>
+
+    <!-- Mapping editor -->
+    <div id="mapping-container"></div>
+
+    <script>
+      async function fetchFiles() {
+        const res = await fetch("/api/csv-mappings");
+        return res.json();
+      }
+
+      async function fetchFile(fileKey) {
+        const res = await fetch("/api/csv-mappings/" + encodeURIComponent(fileKey));
+        if (!res.ok) throw new Error("Failed to fetch file mapping");
+        return res.json();
+      }
+
+      function renderFiles(files) {
+        const tbody = document.getElementById("files-body");
+        tbody.innerHTML = "";
+
+        files.forEach((f) => {
+          const tr = document.createElement("tr");
+
+          const tdKey = document.createElement("td");
+          tdKey.textContent = f.fileKey;
+
+          const tdStatus = document.createElement("td");
+          const span = document.createElement("span");
+          span.className = "badge " + f.status;
+          span.textContent = f.status;
+          tdStatus.appendChild(span);
+
+          const tdAction = document.createElement("td");
+          const btn = document.createElement("button");
+          btn.textContent = "Configure";
+          btn.onclick = () => loadMappingEditor(f.fileKey);
+          tdAction.appendChild(btn);
+
+          tr.appendChild(tdKey);
+          tr.appendChild(tdStatus);
+          tr.appendChild(tdAction);
+
+          tbody.appendChild(tr);
+        });
+      }
+
+      async function loadMappingEditor(fileKey) {
+        const data = await fetchFile(fileKey);
+
+        const container = document.getElementById("mapping-container");
+        container.innerHTML = "";
+
+        const div = document.createElement("div");
+        div.className = "mapping-form";
+
+        const title = document.createElement("h2");
+        title.textContent = "Configure mapping for: " + data.fileKey;
+
+        const p = document.createElement("p");
+        p.textContent = "Select which columns represent Part Number, Category, and Manufacturer.";
+
+        const form = document.createElement("form");
+
+        const fields = [
+          { key: "partNumber", label: "Part Number column" },
+          { key: "category", label: "Category column" },
+          { key: "manufacturer", label: "Manufacturer column" },
+        ];
+
+        const selects = {};
+
+        fields.forEach((field) => {
+          const label = document.createElement("label");
+          label.textContent = field.label + ": ";
+
+          const select = document.createElement("select");
+          data.headers.forEach((h) => {
+            const opt = document.createElement("option");
+            opt.value = h;
+            opt.textContent = h;
+            select.appendChild(opt);
+          });
+
+          // Pre-select existing mapping if any
+          if (data.mapping && data.mapping[field.key]) {
+            select.value = data.mapping[field.key];
+          }
+
+          selects[field.key] = select;
+
+          const wrapper = document.createElement("div");
+          wrapper.style.marginBottom = "8px";
+          wrapper.appendChild(label);
+          wrapper.appendChild(select);
+
+          form.appendChild(wrapper);
+        });
+
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "submit";
+        saveBtn.textContent = "Save mapping";
+        form.appendChild(saveBtn);
+
+        form.onsubmit = async (e) => {
+          e.preventDefault();
+          const payload = {
+            partNumber: selects.partNumber.value,
+            category: selects.category.value,
+            manufacturer: selects.manufacturer.value,
+          };
+
+          const res = await fetch(
+            "/api/csv-mappings/" + encodeURIComponent(data.fileKey),
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            }
+          );
+
+          if (!res.ok) {
+            alert("Failed to save mapping");
+            return;
+          }
+
+          alert("Mapping saved. Status is now 'ready'.");
+          loadAndRenderFiles();
+        };
+
+        div.appendChild(title);
+        div.appendChild(p);
+        div.appendChild(form);
+
+        container.appendChild(div);
+      }
+
+      async function loadAndRenderFiles() {
+        const files = await fetchFiles();
+        renderFiles(files);
+      }
+
+      // Upload form handler
+      document.getElementById("upload-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const statusEl = document.getElementById("upload-status");
+        statusEl.textContent = "Uploading...";
+
+        const fileInput = document.getElementById("file");
+        if (!fileInput.files.length) {
+          statusEl.textContent = "Please select a CSV file.";
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+        const folder = document.getElementById("folder").value;
+        if (folder) {
+          formData.append("folder", folder);
+        }
+
+        const res = await fetch("/api/upload-csv", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          statusEl.textContent = "Upload failed.";
+          return;
+        }
+
+        const data = await res.json();
+        statusEl.textContent =
+          "Uploaded and registered: " + data.fileKey;
+
+        fileInput.value = "";
+        document.getElementById("folder").value = "";
+
+        // Refresh files list
+        loadAndRenderFiles();
+      });
+
+      // Initial load
+      loadAndRenderFiles();
+    </script>
+  </body>
+</html>

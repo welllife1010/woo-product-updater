@@ -3,7 +3,7 @@ dotenv.config();
 
 const { appRedis } = require('./queue');
 const { batchQueue } = require('./queue');
-const { getLatestFolderKey, processCSVFilesInS3LatestFolder } = require('./s3-helpers');
+const { getLatestFolderKey, processCSVFilesInS3LatestFolder, processReadyCsvFilesFromMappings } = require('./s3-helpers');
 const { logger, logErrorToFile,logUpdatesToFile, logInfoToFile, logProgressToFile } = require("./logger");
 const { createUniqueJobId } = require('./utils');
 const { addBatchJob } = require('./job-manager');
@@ -72,7 +72,8 @@ const mainProcess = async () => {
     console.log(`Latest folder detected: ${latestFolder}`);
 
     // ✅ Process files in the latest S3 folder, enqueuing each batch - second parameter is batch size
-    await processCSVFilesInS3LatestFolder(s3BucketName, 20);
+    // await processCSVFilesInS3LatestFolder(s3BucketName, 20);
+    await processReadyCsvFilesFromMappings(s3BucketName, 20);
 
     // ✅ Log completion time
     const endTime = performance.now();
