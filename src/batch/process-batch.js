@@ -93,6 +93,8 @@ function buildCategoryPath(resolvedCategory) {
 async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   const updateMode = process.env.UPDATE_MODE || "full"
   const MAX_RETRIES = 5
+  // Write status after every N rows instead of keeping all in memory
+  const STATUS_FLUSH_INTERVAL = 100;
 
   logInfoToFile(
     `Starting "processBatch()" startIndex=${startIndex}, fileKey=${fileKey}, Mode: ${updateMode}`
@@ -136,7 +138,11 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
         fileKey
       )
       if (!productId || !currentData) {
-        localFailCount++
+        // Missing products are already recorded by fetchProductData
+        // Don't count them as failures
+        skipCount++;  // Count as skipped, not failed
+        skippedParts.push(`Row ${currentIndex + 1}: ${item.part_number} - product not found, saved to missing`);
+        recordBatchStatus(fileKey, updatedParts, skippedParts, failedParts);
         continue
       }
 
@@ -161,8 +167,14 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
           const vendorCategory = getVendorCategoryFromRow(item);
 
           if (vendorCategory) {
-            resolvedCategory = await resolveCategory(vendorCategory);
-
+            try {
+              resolvedCategory = await resolveCategory(vendorCategory);
+            } catch (catErr){
+              logErrorToFile(`Category resolution failed for ${item.part_number}: ${catErr.message}`);
+              // Continue processing without category assignment
+              resolvedCategory = null;
+            }
+            
             if (resolvedCategory) {
               const path = buildCategoryPath(resolvedCategory);
               logInfoToFile(
@@ -273,7 +285,8 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
             currentData,
             toUpdate,
             productId,
-            item
+            item, 
+            fileKey
           )
         ) {
           updatedParts.push(
