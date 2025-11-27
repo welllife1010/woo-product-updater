@@ -31,7 +31,7 @@
 require("dotenv").config();
 
 // WooCommerce API client
-const WooCommerceRestApi = require("@woocommerce/woocommerce-rest-api").default;
+const WooCommerceRestApi = require("woocommerce-rest-ts-api").default;
 
 // Custom logging utilities
 const { logger, logErrorToFile, logInfoToFile } = require("./logger");
