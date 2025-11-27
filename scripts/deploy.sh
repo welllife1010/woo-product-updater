@@ -37,13 +37,13 @@ ENV="${1:-staging}"
 
 if [ "$ENV" == "production" ]; then
     # ⚠️  PRODUCTION - BE CAREFUL!
-    EC2_HOST="YOUR_PRODUCTION_EC2_IP_OR_HOSTNAME"  # TODO: Replace with actual IP
+    EC2_HOST="18.144.155.64"  # TODO: Replace with actual IP
     EC2_USER="ubuntu"
     APP_DIR="/home/ubuntu/woo-product-update"
     PM2_ENV="production"
 elif [ "$ENV" == "staging" ]; then
     # ✅ STAGING - Safe for testing
-    EC2_HOST="YOUR_STAGING_EC2_IP_OR_HOSTNAME"  # TODO: Replace with actual IP
+    EC2_HOST="18.144.155.64"  # TODO: Replace with actual IP
     EC2_USER="ubuntu"
     APP_DIR="/home/ubuntu/woo-product-update"
     PM2_ENV="staging"
@@ -54,7 +54,7 @@ else
 fi
 
 # SSH Key (modify if your key is in a different location)
-SSH_KEY="~/.ssh/your-ec2-key.pem"
+SSH_KEY="~/.ssh/woo-product-update.pem"
 
 echo "=============================================="
 echo "🚀 Deploying to $ENV environment"
