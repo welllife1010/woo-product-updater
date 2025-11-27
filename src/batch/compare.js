@@ -1,56 +1,162 @@
 /*
 ================================================================================
 FILE: src/batch/compare.js
-PURPOSE: Decide whether an update is needed by comparing current vs new data.
+================================================================================
+
+PURPOSE:
+Decide whether an update is needed by comparing current vs new data.
+
 ADDED VALUE:
 - Filters current meta to only fields we track (avoids noise)
 - Encodes all special skip rules in one place
+
+BUG FIX (2025) - NULL SAFETY:
+
+PROBLEM:
+The original code didn't properly handle cases where:
+1. product parameter to filterCurrentData could be null/undefined
+2. currentData or newData in isUpdateNeeded could have null meta_data
+3. Array methods were called on potentially undefined values
+
+This caused intermittent crashes when WooCommerce returned incomplete
+product data or when CSV parsing produced malformed rows.
+
+THE FIX:
+1. Added null checks before accessing object properties
+2. Used optional chaining (?.) and nullish coalescing (??) operators
+3. Added input validation at the start of functions
+4. Defensive array handling with fallbacks to empty arrays
+
 ================================================================================
 */
 
-const { logger, logInfoToFile } = require("../../logger");
+const { logger, logInfoToFile, logErrorToFile } = require("../../logger");
 const { normalizeText, isCurrentMetaMissing, isMetaValueDifferent } = require("./text-utils");
 
 /**
-* @function filterCurrentData
-* @description Reduces a Woo product to only the fields relevant for comparison,
-* preventing false positives from irrelevant meta keys.
-*/
-const filterCurrentData = (product) => ({
-  name: product.name,
-  sku: product.sku,
-  description: product.description,
-  meta_data: (product.meta_data || []).filter((meta) =>
-    [
-      "part_number", "spq", "manufacturer", "image_url", "datasheet_url", "series_url", "series", "quantity",
-      "operating_temperature", "voltage", "package", "supplier_device_package", "mounting_type",
-      "short_description", "detail_description", "additional_key_information", "reach_status",
-      "rohs_status", "moisture_sensitivity_level", "export_control_class_number", "htsus_code",
-    ].includes(meta.key)
-  ),
-});
+ * List of meta_data keys we track for comparison.
+ * 
+ * Only these fields will be included when comparing current vs new data.
+ * This prevents false-positive updates from irrelevant meta keys that
+ * WooCommerce might add (like internal tracking fields).
+ */
+const TRACKED_META_KEYS = [
+  "part_number",
+  "spq",
+  "manufacturer",
+  "image_url",
+  "datasheet_url",
+  "series_url",
+  "series",
+  "quantity",
+  "operating_temperature",
+  "voltage",
+  "package",
+  "supplier_device_package",
+  "mounting_type",
+  "short_description",
+  "detail_description",
+  "additional_key_information",
+  "reach_status",
+  "rohs_status",
+  "moisture_sensitivity_level",
+  "export_control_class_number",
+  "htsus_code",
+];
 
 /**
-* @function isUpdateNeeded
-* @description Returns true if any field differs, applying domain-specific rules
-* (e.g., skip digikey images, don't replace S3 datasheets).
-* @param {Object} currentData - Reduced product from filterCurrentData().
-* @param {Object} newData - Newly built update payload (createNewData()).
-* @param {number} [currentIndex]
-* @param {number} [total]
-* @param {string} [partNumber]
-* @param {string} [fileName]
-* @returns {boolean}
-*/
+ * Reduces a WooCommerce product to only the fields relevant for comparison.
+ * 
+ * This prevents false positives from irrelevant meta keys that WooCommerce
+ * might add (like internal tracking fields, plugin data, etc.)
+ * 
+ * @param {Object|null} product - The WooCommerce product object
+ * @returns {Object} Filtered product with only tracked fields
+ * 
+ * @example
+ * const filtered = filterCurrentData(wooProduct);
+ * // Only contains name, sku, description, and tracked meta_data
+ */
+const filterCurrentData = (product) => {
+  // BUG FIX: Handle null/undefined product
+  if (!product || typeof product !== 'object') {
+    logErrorToFile(`filterCurrentData: Received invalid product: ${typeof product}`);
+    return {
+      name: "",
+      sku: "",
+      description: "",
+      meta_data: [],
+    };
+  }
+
+  return {
+    name: product.name || "",
+    sku: product.sku || "",
+    description: product.description || "",
+    // BUG FIX: Safe array filtering with fallback
+    meta_data: Array.isArray(product.meta_data)
+      ? product.meta_data.filter((meta) => 
+          meta && typeof meta === 'object' && TRACKED_META_KEYS.includes(meta.key)
+        )
+      : [],
+  };
+};
+
+/**
+ * Determines if a WooCommerce product needs to be updated.
+ * 
+ * Compares current product data against new CSV data, applying domain-specific
+ * rules to avoid unnecessary updates.
+ * 
+ * SPECIAL RULES:
+ * - Digikey images: Skipped to avoid hotlinking issues
+ * - S3 datasheets: Never replaced with non-S3 URLs
+ * - Digikey datasheets: Skipped entirely
+ * 
+ * @param {Object} currentData - Reduced product from filterCurrentData()
+ * @param {Object} newData - Newly built update payload from createNewData()
+ * @param {number} [_currentIndex] - Unused, kept for API compatibility
+ * @param {number} [_total] - Unused, kept for API compatibility
+ * @param {string} [partNumber] - Part number for logging
+ * @param {string} [fileName] - File name for logging
+ * @returns {boolean} True if update is needed, false otherwise
+ * 
+ * @example
+ * if (isUpdateNeeded(currentProduct, newPayload, 0, 100, "ABC123", "products.csv")) {
+ *   toUpdate.push(newPayload);
+ * }
+ */
 const isUpdateNeeded = (currentData, newData, _currentIndex, _total, partNumber, fileName) => {
+  // BUG FIX: Early validation of inputs
+  if (!currentData || typeof currentData !== 'object') {
+    logErrorToFile(
+      `[ isUpdateNeeded() ] - Invalid currentData for ${partNumber}: ${typeof currentData}`
+    );
+    // If we can't compare, assume update is needed to be safe
+    return true;
+  }
+
+  if (!newData || typeof newData !== 'object') {
+    logErrorToFile(
+      `[ isUpdateNeeded() ] - Invalid newData for ${partNumber}: ${typeof newData}`
+    );
+    // If we have nothing to update with, skip
+    return false;
+  }
+
   const updateMode = process.env.UPDATE_MODE || "full";
   const fieldsToUpdate = [];
   logInfoToFile(`[ isUpdateNeeded() ] - Checking for updates for Part Number: ${partNumber} in ${fileName}`);
 
   // Quantity-only short circuit
   if (updateMode === "quantity") {
-    const curQ = currentData.meta_data?.find((m) => m.key === "quantity")?.value || "0";
-    const newQ = newData.meta_data?.find((m) => m.key === "quantity")?.value || "0";
+    // BUG FIX: Safe access to meta_data arrays
+    const currentMeta = Array.isArray(currentData.meta_data) ? currentData.meta_data : [];
+    const newMeta = Array.isArray(newData.meta_data) ? newData.meta_data : [];
+    
+    const curQ = currentMeta.find((m) => m && m.key === "quantity")?.value || "0";
+    const newQ = newMeta.find((m) => m && m.key === "quantity")?.value || "0";
+    
     if (curQ !== newQ) {
       logInfoToFile(`[ isUpdateNeeded() ] - Quantity update needed for ${partNumber}: "${curQ}" → "${newQ}"`);
       return true;

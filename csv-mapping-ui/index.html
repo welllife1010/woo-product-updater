@@ -1313,6 +1313,9 @@ KEY IMPROVEMENTS SUMMARY:
             })
           : 'Unknown';
         
+        // BUG FIX: Use escapeForJs() for onclick handler to prevent XSS
+        // The fileKey is inserted into a JavaScript string context, so we need
+        // JavaScript string escaping, not just HTML escaping.
         tableHTML += `
           <tr>
             <td class="file-key" title="${escapeHtml(file.fileKey)}">${escapeHtml(file.fileKey)}</td>
@@ -1322,7 +1325,7 @@ KEY IMPROVEMENTS SUMMARY:
               <button 
                 type="button" 
                 class="btn btn-secondary btn-sm" 
-                onclick="loadMappingEditor('${escapeHtml(file.fileKey)}')"
+                onclick="loadMappingEditor('${escapeForJs(file.fileKey)}')"
               >
                 Configure
               </button>
@@ -1346,13 +1349,51 @@ KEY IMPROVEMENTS SUMMARY:
     // WHY: Prevents XSS attacks by escaping user-provided content before
     // inserting into HTML.
     //
-    // IMPLEMENTATION: Always use escapeHtml() for dynamic content.
+    // BUG FIX (2025): Enhanced escaping for JavaScript string context
+    //
+    // PROBLEM:
+    // The original escapeHtml() only escaped for HTML context (< > & " ').
+    // When used in onclick handlers like onclick="fn('${escapeHtml(str)}')",
+    // certain characters could break out of the JavaScript string:
+    //   - Single quotes could end the string
+    //   - Backslashes could escape the closing quote
+    //   - Newlines could break the JavaScript
+    //
+    // THE FIX:
+    // Added escapeForJs() function that properly escapes for JavaScript
+    // string context. Use this when inserting into onclick/event handlers.
+    //
+    // IMPLEMENTATION: Use escapeHtml() for HTML content, escapeForJs() for
+    // JavaScript strings in event handlers.
     // =======================================================================
     function escapeHtml(text) {
       if (!text) return '';
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    /**
+     * Escape a string for safe use inside JavaScript string literals.
+     * Use this when inserting values into onclick handlers or similar.
+     * 
+     * @param {string} text - The text to escape
+     * @returns {string} Escaped text safe for JS string context
+     * 
+     * @example
+     * // Safe: onclick="fn('${escapeForJs(userInput)}')"
+     */
+    function escapeForJs(text) {
+      if (!text) return '';
+      return String(text)
+        .replace(/\\/g, '\\\\')     // Backslashes first!
+        .replace(/'/g, "\\'")       // Single quotes
+        .replace(/"/g, '\\"')       // Double quotes
+        .replace(/\n/g, '\\n')      // Newlines
+        .replace(/\r/g, '\\r')      // Carriage returns
+        .replace(/\t/g, '\\t')      // Tabs
+        .replace(/</g, '\\x3c')     // Less than (prevents </script> injection)
+        .replace(/>/g, '\\x3e');    // Greater than
     }
 
     // =======================================================================

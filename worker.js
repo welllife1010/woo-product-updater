@@ -364,14 +364,34 @@ batchWorker.on("error", (error) => {
  * 
  * @returns {Promise<boolean>} True if all files are complete
  */
+/**
+ * Check if all files have been fully processed.
+ * 
+ * Used during shutdown to determine if it's safe to exit,
+ * or if there's still work in progress.
+ * 
+ * BUG FIX (2025): Improved fileKey extraction
+ * 
+ * NOTE: worker.js was already using .replace() which is correct.
+ * Added explicit regex anchor for consistency and safety.
+ * 
+ * @returns {Promise<boolean>} True if all files are complete
+ */
 const checkAllFilesProcessed = async () => {
   try {
     // Get all file keys being tracked in Redis
     const fileKeys = await appRedis.keys("total-rows:*");
     
+    // No files being tracked = nothing to process = "complete"
+    if (fileKeys.length === 0) {
+      logInfoToFile("📊 No files being tracked in Redis");
+      return true;
+    }
+    
     for (const key of fileKeys) {
       // Extract the fileKey from the Redis key pattern
-      const fileKey = key.replace("total-rows:", "");
+      // Using regex with anchor (^) to only match at start
+      const fileKey = key.replace(/^total-rows:/, "");
       
       // Get tracking data for this file
       const totalRows = parseInt(await appRedis.get(`total-rows:${fileKey}`) || "0", 10);

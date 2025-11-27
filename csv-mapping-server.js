@@ -129,10 +129,35 @@ app.post("/api/csv-mappings/:fileKey", (req, res) => {
 //   3. Register new CSV with its header row and status "pending"
 //   4. Return fileKey so batch system can use it later.
 
+/**
+ * POST /api/upload-csv - Upload a CSV file to S3 and register for mapping.
+ * 
+ * BUG FIX (2025): Missing temp file cleanup on errors
+ * 
+ * PROBLEM:
+ * The original code only cleaned up the temp file on success (fs.unlinkSync).
+ * If S3 upload failed or any other error occurred, the temp file would remain
+ * on disk indefinitely, potentially filling up the server's storage.
+ * 
+ * THE FIX:
+ * Use try-finally to ensure temp file is ALWAYS cleaned up, regardless of
+ * whether the operation succeeded or failed.
+ * 
+ * Request body (form-data):
+ *   - file: The CSV file to upload
+ *   - folder: Optional S3 folder prefix (e.g., "vendor-uploads/2025/")
+ * 
+ * Response:
+ *   - { ok: true, fileKey, message } on success
+ *   - { error: string } on failure
+ */
 app.post(
   "/api/upload-csv",
   upload.single("file"),
   async (req, res) => {
+    // BUG FIX: Track temp file path for cleanup in finally block
+    const tempFilePath = req.file?.path;
+    
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded." });
@@ -179,9 +204,6 @@ app.post(
       // Register the CSV with its header row for mapping
       await registerNewCsv(fileKey, req.file.path);
 
-      // Clean up temp file
-      fs.unlinkSync(req.file.path);
-
       res.json({
         ok: true,
         fileKey,
@@ -190,6 +212,17 @@ app.post(
     } catch (err) {
       console.error("Upload error:", err);
       res.status(500).json({ error: "Upload failed." });
+    } finally {
+      // BUG FIX: Always clean up temp file, even on error
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+        try {
+          fs.unlinkSync(tempFilePath);
+          console.log(`[upload-csv] Cleaned up temp file: ${tempFilePath}`);
+        } catch (cleanupErr) {
+          // Log but don't throw - cleanup failure shouldn't break the response
+          console.error(`[upload-csv] Failed to clean up temp file ${tempFilePath}: ${cleanupErr.message}`);
+        }
+      }
     }
   }
 );

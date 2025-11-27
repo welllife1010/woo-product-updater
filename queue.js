@@ -142,15 +142,39 @@ if (!isTestEnv) {
   /**
    * REAL BullMQ queue (non-test).
    * This will create a real Redis connection via ioredis.
+   * 
+   * BUG FIX (2025): Synchronized job options with job-manager.js
+   * 
+   * PROBLEM:
+   * queue.js and job-manager.js had different default job options:
+   *   - queue.js: attempts = 3
+   *   - job-manager.js: attempts = 5
+   * 
+   * This caused confusion and inconsistent behavior depending on whether
+   * jobs used defaults or had explicit options.
+   * 
+   * THE FIX:
+   * 1. Aligned attempts to 5 in both places
+   * 2. Added timeout (300000ms = 5 minutes) to defaults
+   * 3. Added clear documentation about which options are used where
+   * 
+   * NOTE: Options in addBatchJob() (job-manager.js) OVERRIDE these defaults.
+   * These defaults only apply if addBatchJob doesn't specify options.
    */
   batchQueue = new Queue(QUEUE_NAME, {
     connection: bullmqConnection,
     prefix: BULLMQ_PREFIX, // keys: <prefix>:<queueName>:<suffix>
     defaultJobOptions: {
+      // Keep last N completed/failed jobs for debugging
       removeOnComplete: 100,
       removeOnFail: 50,
-      attempts: 3,
+      
+      // Retry configuration - SYNCED with job-manager.js
+      attempts: 5,  // Changed from 3 to match job-manager.js
       backoff: { type: "exponential", delay: 5000 },
+      
+      // Job timeout - Added to match job-manager.js
+      timeout: 300000, // 5 minutes
     },
   });
 

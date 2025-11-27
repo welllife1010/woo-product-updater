@@ -151,26 +151,47 @@ const server = app.listen(PORT, () => {
 });
 
 // -------------------- Processing-complete check & shutdown --------------------
-// Check if all files are processed
+/**
+ * Check if all files have been fully processed.
+ * 
+ * BUG FIX (2025): Fragile fileKey parsing
+ * 
+ * PROBLEM:
+ * The original code used `key.split(":")[1]` to extract the fileKey from
+ * Redis keys like "total-rows:products.csv". This breaks when the fileKey
+ * contains a colon, e.g., "total-rows:vendor:uploads/products.csv"
+ * would incorrectly parse to just "vendor".
+ * 
+ * THE FIX:
+ * Use a more robust parsing method that handles colons in fileKeys:
+ *   - Split only on the FIRST colon
+ *   - Join the remaining parts back together
+ *   - Or better: use .replace() to remove the prefix
+ * 
+ * @returns {Promise<boolean>} True if all files are complete, false otherwise
+ */
 const checkAllFilesProcessed = async () => {
   try {
     const fileKeys = await appRedis.keys("total-rows:*");
     for (const key of fileKeys) {
-      const fileKey = key.split(":")[1];
+      // BUG FIX: Use .replace() instead of .split()[1] to handle colons in fileKey
+      // This correctly handles fileKeys like "vendor:uploads/products.csv"
+      const fileKey = key.replace(/^total-rows:/, "");
+      
       const totalRows = parseInt(
-        await appRedis.get(`total-rows:${fileKey}`),
+        await appRedis.get(`total-rows:${fileKey}`) || "0",
         10
       );
       const updated = parseInt(
-        (await appRedis.get(`updated-products:${fileKey}`)) || 0,
+        await appRedis.get(`updated-products:${fileKey}`) || "0",
         10
       );
       const skipped = parseInt(
-        (await appRedis.get(`skipped-products:${fileKey}`)) || 0,
+        await appRedis.get(`skipped-products:${fileKey}`) || "0",
         10
       );
       const failed = parseInt(
-        (await appRedis.get(`failed-products:${fileKey}`)) || 0,
+        await appRedis.get(`failed-products:${fileKey}`) || "0",
         10
       );
 

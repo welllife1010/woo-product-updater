@@ -344,14 +344,42 @@ const getProductIdByPartNumber = async (
    */
   const cacheKey = `productId:${partNumber}:${normalizedManufacturer}`;
 
+  /**
+   * BUG FIX (2025): Redis returns strings, not numbers
+   * 
+   * PROBLEM:
+   * Redis stores all values as strings. When we cached a product ID (number)
+   * and retrieved it, we returned a STRING instead of a NUMBER.
+   * 
+   * This caused subtle bugs downstream:
+   *   - `productId === 12345` would fail because "12345" !== 12345
+   *   - Type checks like `typeof productId === 'number'` would fail
+   *   - Comparisons with other product IDs could fail
+   * 
+   * THE FIX:
+   * Parse the cached value back to an integer before returning.
+   * Also validate that the parsed value is a valid number.
+   */
   try {
     const cachedProductId = await appRedis.get(cacheKey);
     if (cachedProductId) {
-      logInfoToFile(
-        `getProductIdByPartNumber() - ✅ CACHE HIT: Product ID ${cachedProductId} ` +
-        `for Part: ${partNumber} | Manufacturer: ${manufacturer}`
-      );
-      return cachedProductId;
+      // BUG FIX: Parse string to number before returning
+      const parsedId = parseInt(cachedProductId, 10);
+      
+      // Validate the parsed value is a valid number
+      if (!isNaN(parsedId) && parsedId > 0) {
+        logInfoToFile(
+          `getProductIdByPartNumber() - ✅ CACHE HIT: Product ID ${parsedId} ` +
+          `for Part: ${partNumber} | Manufacturer: ${manufacturer}`
+        );
+        return parsedId;
+      } else {
+        // Invalid cached value - log and continue to API lookup
+        logInfoToFile(
+          `getProductIdByPartNumber() - ⚠️ Invalid cached value "${cachedProductId}" ` +
+          `for ${partNumber}, querying API...`
+        );
+      }
     }
   } catch (cacheError) {
     // Cache miss or error - continue with API lookup
