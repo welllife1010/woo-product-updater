@@ -1,190 +1,563 @@
-const dotenv = require("dotenv");
-dotenv.config();
+/**
+ * =============================================================================
+ * FILE: woo-helpers.js
+ * =============================================================================
+ * 
+ * PURPOSE:
+ * Provides helper functions for interacting with the WooCommerce REST API.
+ * Handles product lookups, caching, and retry logic.
+ * 
+ * KEY FUNCTIONS:
+ * - getProductById: Fetch a product by its WooCommerce ID
+ * - getProductIdByPartNumber: Find a product by part_number + manufacturer
+ * 
+ * BUG #5 FIX (2025):
+ * The pagination in getProductIdByPartNumber was limited to maxPages * perPage
+ * results (5 * 5 = 25 products). If the correct product was beyond page 5,
+ * it would never be found and incorrectly marked as "missing."
+ * 
+ * THE FIX:
+ * Now we check the `x-wp-total` header from WooCommerce to know the actual
+ * total number of matching products. We continue paginating until we've
+ * checked all results OR found a match.
+ * 
+ * =============================================================================
+ */
 
-const WooCommerceRestApi = require("woocommerce-rest-ts-api").default;
-// const Bottleneck = require("bottleneck");
+// =============================================================================
+// IMPORTS
+// =============================================================================
+
+require("dotenv").config();
+
+// WooCommerce API client
+const WooCommerceRestApi = require("@woocommerce/woocommerce-rest-api").default;
+
+// Custom logging utilities
 const { logger, logErrorToFile, logInfoToFile } = require("./logger");
-const { limiter, scheduleApiRequest } = require('./job-manager');
-const { createUniqueJobId } = require('./utils');
-const { appRedis } = require('./queue');
 
-// Function to get WooCommerce API credentials based on execution mode
-const getWooCommerceApiCredentials = (executionMode) => {
-    return (executionMode === 'development') ? {
-        url: process.env.WOO_API_BASE_URL_TEST,
-        consumerKey: process.env.WOO_API_CONSUMER_KEY_TEST,
-        consumerSecret: process.env.WOO_API_CONSUMER_SECRET_TEST,
-        version: "wc/v3",
-        timeout: 300000 // Set a longer timeout (in milliseconds)
-    } : {
-        url: process.env.WOO_API_BASE_URL,
-        consumerKey: process.env.WOO_API_CONSUMER_KEY,
-        consumerSecret: process.env.WOO_API_CONSUMER_SECRET,
-        version: "wc/v3",
-        timeout: 300000
-    };
-};
+// Redis client for caching
+const { appRedis } = require("./queue");
 
-const wooApi = new WooCommerceRestApi(getWooCommerceApiCredentials(process.env.EXECUTION_MODE));
+// Job scheduling with rate limiting (Bottleneck)
+// The limiter is CRITICAL for preventing 429/504 errors from WooCommerce
+const { scheduleApiRequest, limiter } = require("./job-manager");
 
-// Define a Set to keep track of products that were retried
-const retriedProducts = new Set();
+// Utility for creating unique job IDs
+const { createUniqueJobId } = require("./utils");
 
-// Configure retry options to handle 504 or 429 errors
+// =============================================================================
+// RATE LIMITING CONFIGURATION
+// =============================================================================
+
+/**
+ * Configure retry behavior for rate-limited requests.
+ * 
+ * When WooCommerce returns 429 (Too Many Requests) or 504 (Gateway Timeout),
+ * we use exponential backoff to wait before retrying.
+ * 
+ * The limiter (Bottleneck) from job-manager.js handles:
+ *   - maxConcurrent: 2 (only 2 requests at a time)
+ *   - minTime: 1000ms (minimum 1 second between requests)
+ * 
+ * This listener adds additional retry logic for specific error types.
+ */
 limiter.on("failed", async (error, jobInfo) => {
-    //const jobId = jobInfo.options.id || "<unknown>";
-    const jobId = createUniqueJobId(jobInfo.options.id, "woo-helpers_retry-setting", "", jobInfo.retryCount) || "<unknown>";
-    const { file = "<unknown file>", functionName = "<unknown function>", part = "<unknown part>" } = jobInfo.options.context || {};
-    const retryCount = jobInfo.retryCount || 0;
+  const { retryCount } = jobInfo;
+  const jobId = jobInfo.options?.id || "unknown";
+  const context = jobInfo.options?.context || {};
+  const { file, functionName, part } = context;
 
-    logErrorToFile(
-        `Retrying job "${jobId}" due to ${error.message}. | File: ${file} | Function: ${functionName} | Retry count: ${retryCount + 1}`
+  logErrorToFile(
+    `Bottleneck job failed | Job: ${jobId} | File: ${file} | ` +
+    `Function: ${functionName} | Part: ${part} | Retry: ${retryCount + 1} | ` +
+    `Error: ${error.message}`
+  );
+
+  // Track retried products for debugging
+  if (part) retriedProducts.add(part);
+
+  /**
+   * Retry logic for transient errors:
+   *   - ECONNRESET: Connection was reset (network issue)
+   *   - socket hang up: Connection closed unexpectedly
+   *   - 502: Bad Gateway (server overload)
+   *   - 504: Gateway Timeout (request took too long)
+   *   - 429: Too Many Requests (rate limited)
+   *   - 499: Client Closed Request (nginx-specific)
+   */
+  const retryableErrors = /(ECONNRESET|socket hang up|502|504|429|499)/i;
+  
+  if (retryCount < 5 && retryableErrors.test(error.message)) {
+    // Exponential backoff: 2s, 4s, 8s, 16s, 32s
+    const retryDelay = 1000 * Math.pow(2, retryCount + 1);
+    
+    logInfoToFile(
+      `Bottleneck: Scheduling retry in ${retryDelay / 1000}s for job ${jobId}`
     );
+    
+    return retryDelay; // Returning a number tells Bottleneck to retry after this delay
+  }
 
-    // Add part number to retriedProducts if a retry occurs
-    if (part) retriedProducts.add(part);
+  // If we've exceeded retries or it's not a retryable error, don't retry
+  if (retryCount >= 5) {
+    logErrorToFile(
+      `Bottleneck: Job ${jobId} FAILED permanently after ${retryCount + 1} attempts ` +
+      `for part "${part}"`
+    );
+  }
 
-    if (retryCount < 5 && /(ECONNRESET|socket hang up|502|504|429)/.test(error.message)) {
-        const retryDelay = 1000 * Math.pow(2, jobInfo.retryCount); // Exponential backoff
-        logger.warn(`Applying delay of ${retryDelay / 1000}s before retrying job ${jobId}`);
-        logErrorToFile(`Retrying job due to ${error.message}. Retry count: ${retryCount + 1}`);
-        return retryDelay;
-    }
-
-    if (retryCount >= 5) {
-        logErrorToFile(`Job "${jobId}" failed permanently for part "${part}" after maximum retries due to ${error.message}.`);
-    }
-
+  // Return undefined = don't retry
+  return undefined;
 });
 
-// Get product details by product ID
+// =============================================================================
+// WOOCOMMERCE API CLIENT SETUP
+// =============================================================================
+
+/**
+ * Determine which WooCommerce environment to connect to based on EXECUTION_MODE.
+ * 
+ * Environments:
+ * - production: Live WooCommerce store
+ * - development: Development/staging store
+ * - test: Test store (for automated testing)
+ */
+const executionMode = process.env.EXECUTION_MODE || "production";
+
+/**
+ * Get the appropriate API credentials based on execution mode.
+ */
+function getWooConfig() {
+  if (executionMode === "test") {
+    return {
+      url: process.env.WOO_API_BASE_URL_TEST,
+      consumerKey: process.env.WOO_API_CONSUMER_KEY_TEST,
+      consumerSecret: process.env.WOO_API_CONSUMER_SECRET_TEST,
+    };
+  } else if (executionMode === "development") {
+    return {
+      url: process.env.WOO_API_BASE_URL_DEV,
+      consumerKey: process.env.WOO_API_CONSUMER_KEY_DEV,
+      consumerSecret: process.env.WOO_API_CONSUMER_SECRET_DEV,
+    };
+  } else {
+    // Production (default)
+    return {
+      url: process.env.WOO_API_BASE_URL,
+      consumerKey: process.env.WOO_API_CONSUMER_KEY,
+      consumerSecret: process.env.WOO_API_CONSUMER_SECRET,
+    };
+  }
+}
+
+const wooConfig = getWooConfig();
+
+/**
+ * Initialize the WooCommerce REST API client.
+ */
+const wooApi = new WooCommerceRestApi({
+  url: wooConfig.url,
+  consumerKey: wooConfig.consumerKey,
+  consumerSecret: wooConfig.consumerSecret,
+  version: "wc/v3",                    // WooCommerce API version
+  queryStringAuth: true,               // Use query string auth (not headers)
+  timeout: 60000,                      // 60 second timeout
+});
+
+logInfoToFile(`WooCommerce API initialized for ${executionMode} mode: ${wooConfig.url}`);
+
+// =============================================================================
+// RETRY TRACKING
+// =============================================================================
+
+/**
+ * Set of part numbers that have been retried.
+ * Used for debugging and monitoring retry patterns.
+ */
+const retriedProducts = new Set();
+
+// =============================================================================
+// API FUNCTIONS
+// =============================================================================
+
+/**
+ * Get a product's full details by its WooCommerce product ID.
+ * 
+ * This is typically called after finding the product ID via getProductIdByPartNumber.
+ * Returns the complete product object including all meta_data.
+ * 
+ * @param {number} productId - The WooCommerce product ID
+ * @param {string} fileKey - File identifier for logging
+ * @param {number} currentIndex - Current row index for logging
+ * @returns {Promise<Object|null>} - Product object or null if not found/error
+ * 
+ * @example
+ * const product = await getProductById(12345, "products.csv", 100);
+ * if (product) {
+ *   console.log(product.name, product.meta_data);
+ * }
+ */
 const getProductById = async (productId, fileKey, currentIndex) => {
-    let attempts = 0;
-    const action = 'woo-helper_getProductById';
+  const action = "woo-helper_getProductById";
+  let attempts = 0;
+  const maxAttempts = 5;
 
-    while (attempts < 5) {
-        // Create a unique job ID
-        const jobId = createUniqueJobId(fileKey, action, currentIndex, attempts);
+  while (attempts < maxAttempts) {
+    // Create unique job ID for tracking and deduplication
+    const jobId = createUniqueJobId(fileKey, action, currentIndex, attempts);
 
-        try {
-
-            // Use the centralized job scheduling function
-            const response = await scheduleApiRequest(
-                () => wooApi.get(`products/${productId}`), // Task function for API call
-                { 
-                    id: jobId,
-                    context: { 
-                        file: "woo-helpers.js", 
-                        functionName: "getProductById", 
-                        part: `${productId}`
-                    }
-                }
-            );
-        
-            return response.data; // Return product details on success
-
-        } catch (error) {
-            attempts++;
-            logErrorToFile(`Retry attempt ${attempts} failed for job ID: ${jobId}. Error: ${error.message}`);
-
-            if (attempts >= 5) {
-                logErrorToFile(`getProductById function failed permanently after ${attempts} attempts for job ID: ${jobId} \n Error fetching product with ID ${productId}: ${error.response ?? error.message }`);
-                return null;
-            }
-
-            const delay = Math.pow(2, attempts) * 1000;
-            logInfoToFile(`Retrying job ID: ${jobId} after ${delay / 1000}s...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
+    try {
+      // Use the centralized job scheduler (handles rate limiting)
+      const response = await scheduleApiRequest(
+        () => wooApi.get(`products/${productId}`),
+        {
+          id: jobId,
+          context: {
+            file: "woo-helpers.js",
+            functionName: "getProductById",
+            part: `${productId}`,
+          },
         }
+      );
+
+      // Success - return the product data
+      return response.data;
+
+    } catch (error) {
+      attempts++;
+      logErrorToFile(
+        `getProductById() - Attempt ${attempts}/${maxAttempts} failed for product ID ${productId}: ${error.message}`
+      );
+
+      // Check if we've exhausted all attempts
+      if (attempts >= maxAttempts) {
+        logErrorToFile(
+          `getProductById() - FAILED permanently after ${attempts} attempts for product ID ${productId}`
+        );
+        return null;
+      }
+
+      // Exponential backoff before retry
+      const delay = Math.pow(2, attempts) * 1000; // 2s, 4s, 8s, 16s
+      logInfoToFile(`getProductById() - Retrying in ${delay / 1000}s...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
+  }
+
+  return null;
 };
+
+/**
+ * =============================================================================
+ * Find a WooCommerce product ID by part_number and manufacturer.
+ * =============================================================================
+ * 
+ * This is the PRIMARY lookup function for matching CSV rows to WooCommerce products.
+ * 
+ * HOW IT WORKS:
+ * 1. Check Redis cache first (fast path)
+ * 2. If not cached, search WooCommerce API by part_number
+ * 3. For each result, check if manufacturer matches
+ * 4. If found, cache in Redis and return the product ID
+ * 5. If not found after checking ALL results, return null
+ * 
+ * BUG #5 FIX:
+ * Previously, we limited pagination to maxPages (5 pages = 25 products).
+ * If the correct product was on page 6+, it would never be found.
+ * 
+ * NOW:
+ * We use the `x-wp-total` header from WooCommerce to know the ACTUAL total
+ * number of matching products, and continue paginating until we've checked
+ * all of them or found a match.
+ * 
+ * @param {string} partNumber - The part number to search for
+ * @param {string} manufacturer - The manufacturer to match (case-insensitive)
+ * @param {number} currentIndex - Current row index for logging
+ * @param {number} totalProducts - Total products in file for logging
+ * @param {string} fileKey - File identifier for logging and caching
+ * @returns {Promise<number|null>} - WooCommerce product ID or null if not found
+ * 
+ * @example
+ * const productId = await getProductIdByPartNumber(
+ *   "STM32F103C8T6",
+ *   "STMicroelectronics",
+ *   50,
+ *   1000,
+ *   "microcontrollers.csv"
+ * );
+ */
+const getProductIdByPartNumber = async (
+  partNumber,
+  manufacturer,
+  currentIndex,
+  totalProducts,
+  fileKey
+) => {
+  const action = "getProductIdByPartNumber";
+  let attempts = 0;
+  const maxAttempts = 5;
+
+  // =========================================================================
+  // CONFIGURATION
+  // =========================================================================
   
-// Find product ID by custom field "part_number"
-const getProductIdByPartNumber = async (partNumber, manufacturer, currentIndex, totalProducts, fileKey) => {
-    const action = 'getProductIdByPartNumber';
-    let attempts = 0;
-    let page = 1; // Start pagination
-    let perPage = 5; // ✅ Fetch 5 products at a time
-    let maxPages = 5; // ✅ Limit search to 5 pages
+  /**
+   * perPage: How many products to fetch per API call.
+   * Higher values = fewer API calls but more data per call.
+   * WooCommerce maximum is typically 100.
+   */
+  const perPage = 10;
 
-    // ✅ Normalize manufacturer for case-insensitive comparison
-    const normalizedManufacturer = (typeof manufacturer === "string" ? manufacturer.trim().toLowerCase() : "");
+  /**
+   * REMOVED: maxPages limit
+   * 
+   * OLD CODE (Bug #5):
+   *   let maxPages = 5; // Only checks first 25 products!
+   * 
+   * NEW CODE:
+   *   We now use x-wp-total header to determine actual total,
+   *   and continue until all products are checked.
+   */
 
-    // ✅ Check Redis cache before making WooCommerce API calls
-    const cacheKey = `productId:${partNumber}:${normalizedManufacturer}`;
+  // =========================================================================
+  // NORMALIZE MANUFACTURER FOR COMPARISON
+  // =========================================================================
+  /**
+   * Manufacturer names can vary:
+   *   - "STMicroelectronics" vs "stmicroelectronics" vs " STMicroelectronics "
+   * 
+   * We normalize to lowercase and trim whitespace for reliable comparison.
+   */
+  const normalizedManufacturer =
+    typeof manufacturer === "string" ? manufacturer.trim().toLowerCase() : "";
+
+  // =========================================================================
+  // STEP 1: CHECK REDIS CACHE
+  // =========================================================================
+  /**
+   * If we've already looked up this part_number + manufacturer combination,
+   * return the cached result to avoid redundant API calls.
+   * 
+   * Cache key format: productId:{partNumber}:{manufacturer}
+   * TTL: 24 hours (86400 seconds)
+   */
+  const cacheKey = `productId:${partNumber}:${normalizedManufacturer}`;
+
+  try {
     const cachedProductId = await appRedis.get(cacheKey);
     if (cachedProductId) {
-        logInfoToFile(`"getProductIdByPartNumber()" - ✅ Using cached Product ID ${cachedProductId} for Part Number: ${partNumber} | Manufacturer: ${manufacturer}`);
-        return cachedProductId; // ✅ Return cached result
+      logInfoToFile(
+        `getProductIdByPartNumber() - ✅ CACHE HIT: Product ID ${cachedProductId} ` +
+        `for Part: ${partNumber} | Manufacturer: ${manufacturer}`
+      );
+      return cachedProductId;
     }
+  } catch (cacheError) {
+    // Cache miss or error - continue with API lookup
+    logInfoToFile(
+      `getProductIdByPartNumber() - Cache miss for ${partNumber}, querying API...`
+    );
+  }
 
-    while (attempts < 5) {
-        // Create a unique job ID
-        const jobId = createUniqueJobId(fileKey, action, currentIndex, attempts);
+  // =========================================================================
+  // STEP 2: SEARCH WOOCOMMERCE API WITH PAGINATION
+  // =========================================================================
+  
+  while (attempts < maxAttempts) {
+    const jobId = createUniqueJobId(fileKey, action, currentIndex, attempts);
 
-        try {
+    try {
+      let page = 1;
+      let totalProductsInWoo = null;  // Will be set from x-wp-total header
+      let productsChecked = 0;
 
-            while (page <= maxPages) { // ✅ Limit to 5 pages to prevent unnecessary API calls
+      // =====================================================================
+      // PAGINATION LOOP - Continue until all products checked or match found
+      // =====================================================================
+      while (true) {
+        logInfoToFile(
+          `getProductIdByPartNumber() - 🔍 Searching page ${page} for Part: ${partNumber}`
+        );
 
-                const response = await scheduleApiRequest(
-                    () => wooApi.get("products", { search: partNumber, per_page: perPage, page }), // ✅ Fetch multiple products
-                    { 
-                        id: jobId,
-                        context: { file: "woo-helpers.js", functionName: "getProductIdByPartNumber", part: `${partNumber}` }
-                    }
-                );
-    
-                if (!response.data.length) {
-                    logErrorToFile(`"getProductIdByPartNumber()" - ❌ No exact manufacturer match found for Part Number: ${partNumber} in file "${fileKey}" after checking ${page - 1} pages.`);
-                    return null;
-                }
-    
-                // ✅ Loop through results to find the correct manufacturer match
-                for (const product of response.data) {
-                    const productManufacturer = product.meta_data.find(meta => meta.key === "manufacturer")?.value?.trim().toLowerCase() || "";
+        // Make the API request
+        const response = await scheduleApiRequest(
+          () => wooApi.get("products", {
+            search: partNumber,
+            per_page: perPage,
+            page: page,
+          }),
+          {
+            id: `${jobId}_page${page}`,
+            context: {
+              file: "woo-helpers.js",
+              functionName: "getProductIdByPartNumber",
+              part: partNumber,
+            },
+          }
+        );
 
-                    logInfoToFile(`"getProductIdByPartNumber()" - 🔎 Checking Part Number: ${partNumber} -> WooCommerce Manufacturer: "${productManufacturer}" vs CSV Manufacturer: "${normalizedManufacturer}"`);
-    
-                    if (productManufacturer === normalizedManufacturer) {
-                        logInfoToFile(`"getProductIdByPartNumber()" - ✅ Found exact match for Part Number: ${partNumber} | Manufacturer: ${manufacturer} in file "${fileKey}".`);
-    
-                        // ✅ Store result in Redis with TTL (e.g., expire after 24 hours)
-                        await appRedis.set(cacheKey, product.id, { EX: 86400 });
-                        logInfoToFile(`"getProductIdByPartNumber()" - ✅ Caching Product ID ${product.id} in Redis.`);
-    
-                        logInfoToFile(`"getProductIdByPartNumber()" - ✅ returning Product ID ${product.id} for Part Number: ${partNumber} | Manufacturer: ${manufacturer}`);
-                        return product.id; // ✅ Return the correct product
-                    }
-                }
-    
-                logInfoToFile(`"getProductIdByPartNumber()" - 🔄 No manufacturer match on page ${page} for Part Number: ${partNumber}. Checking next page...`);
-                page++; // ✅ Continue searching the next batch
-            
-            }
-    
-            logErrorToFile(`"getProductIdByPartNumber()" - ❌ Max page limit reached (${maxPages}) for Part Number: ${partNumber}. No exact manufacturer match found.`);
+        // =================================================================
+        // BUG #5 FIX: Get total count from x-wp-total header
+        // =================================================================
+        /**
+         * WooCommerce returns these headers:
+         *   - x-wp-total: Total number of matching products
+         *   - x-wp-totalpages: Total number of pages
+         * 
+         * We use x-wp-total to know when we've checked all products.
+         */
+        if (totalProductsInWoo === null) {
+          // First page - extract total from headers
+          const totalHeader = response.headers?.["x-wp-total"];
+          totalProductsInWoo = totalHeader ? parseInt(totalHeader, 10) : 0;
+
+          logInfoToFile(
+            `getProductIdByPartNumber() - 📊 Total matching products in WooCommerce: ${totalProductsInWoo}`
+          );
+
+          // If no products match this search at all, exit early
+          if (totalProductsInWoo === 0) {
+            logInfoToFile(
+              `getProductIdByPartNumber() - ❌ No products found for Part: ${partNumber}`
+            );
             return null;
+          }
+        }
 
-        } catch (error) {
-            attempts++;
-            logErrorToFile(`"getProductIdByPartNumber()" - Attempt ${attempts} failed for job ID: ${jobId}. Error: ${error.message}`);
+        // Check if this page returned any results
+        const products = response.data || [];
+        
+        if (products.length === 0) {
+          // No more products to check
+          logInfoToFile(
+            `getProductIdByPartNumber() - ❌ No more products on page ${page}. ` +
+            `Checked ${productsChecked}/${totalProductsInWoo} products.`
+          );
+          break;
+        }
 
-            if (attempts >= 5) {
-                logErrorToFile(`"getProductIdByPartNumber()" - Failed permanently after ${attempts} attempts for job ID: ${jobId}`);
-                return null;
+        // =================================================================
+        // Check each product on this page for manufacturer match
+        // =================================================================
+        for (const product of products) {
+          productsChecked++;
+
+          // Extract manufacturer from product meta_data
+          const productManufacturer =
+            product.meta_data
+              ?.find((meta) => meta.key === "manufacturer")
+              ?.value?.trim()
+              .toLowerCase() || "";
+
+          logInfoToFile(
+            `getProductIdByPartNumber() - 🔎 [${productsChecked}/${totalProductsInWoo}] ` +
+            `Checking Product ID ${product.id}: ` +
+            `WooCommerce Manufacturer: "${productManufacturer}" ` +
+            `vs CSV Manufacturer: "${normalizedManufacturer}"`
+          );
+
+          // Check for manufacturer match
+          if (productManufacturer === normalizedManufacturer) {
+            // ✅ FOUND IT!
+            logInfoToFile(
+              `getProductIdByPartNumber() - ✅ MATCH FOUND! ` +
+              `Product ID ${product.id} for Part: ${partNumber} | Manufacturer: ${manufacturer}`
+            );
+
+            // Cache the result in Redis (TTL: 24 hours)
+            try {
+              await appRedis.set(cacheKey, product.id, { EX: 86400 });
+              logInfoToFile(
+                `getProductIdByPartNumber() - ✅ Cached Product ID ${product.id} in Redis`
+              );
+            } catch (cacheError) {
+              logErrorToFile(
+                `getProductIdByPartNumber() - ⚠️ Failed to cache: ${cacheError.message}`
+              );
             }
 
-            const delay = Math.pow(2, attempts) * 1000;
-            logInfoToFile(`"getProductIdByPartNumber()" - Retrying job ID: ${jobId} after ${delay / 1000}s...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
+            return product.id;
+          }
         }
+
+        // =================================================================
+        // BUG #5 FIX: Check if we've exhausted all products
+        // =================================================================
+        /**
+         * OLD CODE (buggy):
+         *   if (page >= maxPages) break;  // Only checked first 25!
+         * 
+         * NEW CODE:
+         *   Check if we've looked at all products based on x-wp-total
+         */
+        if (productsChecked >= totalProductsInWoo) {
+          logInfoToFile(
+            `getProductIdByPartNumber() - ✅ Checked all ${productsChecked} products. ` +
+            `No manufacturer match found for Part: ${partNumber}`
+          );
+          break;
+        }
+
+        // Move to next page
+        page++;
+
+        // Safety limit to prevent infinite loops (in case of API issues)
+        const maxSafetyPages = 50; // 50 pages * 10 per page = 500 products max
+        if (page > maxSafetyPages) {
+          logErrorToFile(
+            `getProductIdByPartNumber() - ⚠️ Safety limit reached (${maxSafetyPages} pages). ` +
+            `Stopping pagination for Part: ${partNumber}`
+          );
+          break;
+        }
+      }
+
+      // If we get here, we've checked all products and found no match
+      logErrorToFile(
+        `getProductIdByPartNumber() - ❌ No manufacturer match found for Part: ${partNumber} ` +
+        `after checking ${productsChecked} products in WooCommerce.`
+      );
+      return null;
+
+    } catch (error) {
+      // =================================================================
+      // RETRY LOGIC
+      // =================================================================
+      attempts++;
+      retriedProducts.add(partNumber);
+
+      logErrorToFile(
+        `getProductIdByPartNumber() - Attempt ${attempts}/${maxAttempts} failed: ${error.message}`
+      );
+
+      if (attempts >= maxAttempts) {
+        logErrorToFile(
+          `getProductIdByPartNumber() - FAILED permanently after ${attempts} attempts ` +
+          `for Part: ${partNumber}`
+        );
+        return null;
+      }
+
+      // Exponential backoff
+      const delay = Math.pow(2, attempts) * 1000;
+      logInfoToFile(
+        `getProductIdByPartNumber() - Retrying in ${delay / 1000}s...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
+  }
+
+  return null;
 };
 
+// =============================================================================
+// EXPORTS
+// =============================================================================
 
-  module.exports = {
-    wooApi,
-    getProductIdByPartNumber,
-    getProductById,
-    retriedProducts
-  };
+module.exports = {
+  wooApi,
+  getProductById,
+  getProductIdByPartNumber,
+  retriedProducts,
+};
