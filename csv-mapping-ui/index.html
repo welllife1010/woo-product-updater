@@ -1,1739 +1,188 @@
 <!DOCTYPE html>
 <html lang="en">
-<!--
-================================================================================
-CSV COLUMN MAPPING UI - IMPROVED VERSION
-================================================================================
-
-OVERVIEW:
-This is a comprehensive rewrite of the CSV Column Mapping UI with professional
-styling, improved UX, error handling, and accessibility improvements.
-
-HOW TO IMPLEMENT:
-Replace the existing csv-mapping-ui/index.html with this file.
-
-================================================================================
-KEY IMPROVEMENTS SUMMARY:
-================================================================================
-
-1. VISUAL DESIGN IMPROVEMENTS
-   - Modern color scheme with CSS custom properties (variables) for easy theming
-   - Refined typography using system fonts with better fallbacks
-   - Card-based layout for better visual hierarchy
-   - Subtle shadows and borders for depth
-   - Consistent spacing using CSS variables
-
-2. USER EXPERIENCE IMPROVEMENTS
-   - Loading states with spinners for async operations
-   - Toast notifications instead of browser alerts
-   - Confirmation dialogs for destructive actions
-   - Better empty states when no files exist
-   - Keyboard accessibility (Tab navigation, Enter to submit)
-
-3. ERROR HANDLING IMPROVEMENTS
-   - Try-catch blocks around all async operations
-   - User-friendly error messages
-   - Network error detection and retry suggestions
-   - Validation before form submission
-
-4. ACCESSIBILITY IMPROVEMENTS
-   - Proper ARIA labels and roles
-   - Focus management after actions
-   - Screen reader announcements
-   - Color contrast compliance (WCAG AA)
-
-5. CODE QUALITY IMPROVEMENTS
-   - Modular JavaScript functions
-   - Constants for magic strings
-   - Debouncing for rapid actions
-   - Clean separation of concerns
-
-================================================================================
--->
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CSV Column Mapping | Admin Dashboard</title>
-  
-  <!--
-  ============================================================================
-  FIX #1: Added viewport meta tag for responsive design
-  
-  WHY: The original UI had no viewport tag, causing poor display on mobile
-  devices and tablets. This ensures proper scaling on all screen sizes.
-  
-  IMPLEMENTATION: Add this meta tag in the <head> section.
-  ============================================================================
-  -->
-  
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Woo Product Updater</title>
   <style>
-    /*
-    ==========================================================================
-    FIX #2: CSS Custom Properties (Variables) for Theming
-    
-    WHY: The original used hardcoded colors throughout, making theming and
-    maintenance difficult. CSS variables allow centralized color management.
-    
-    IMPLEMENTATION: Define all colors, spacing, and typography at :root level.
-    Reference using var(--variable-name) throughout the stylesheet.
-    ==========================================================================
-    */
-    :root {
-      /* Color Palette - Professional blue-gray theme */
-      --color-primary: #2563eb;        /* Main action color */
-      --color-primary-hover: #1d4ed8;  /* Hover state */
-      --color-primary-light: #dbeafe; /* Light variant for backgrounds */
-      
-      --color-success: #059669;        /* Success states */
-      --color-success-light: #d1fae5;
-      
-      --color-warning: #d97706;        /* Warning/pending states */
-      --color-warning-light: #fef3c7;
-      
-      --color-danger: #dc2626;         /* Error/destructive states */
-      --color-danger-light: #fee2e2;
-      
-      --color-gray-50: #f9fafb;        /* Lightest background */
-      --color-gray-100: #f3f4f6;       /* Card backgrounds */
-      --color-gray-200: #e5e7eb;       /* Borders */
-      --color-gray-300: #d1d5db;       /* Disabled states */
-      --color-gray-400: #9ca3af;       /* Placeholder text */
-      --color-gray-500: #6b7280;       /* Secondary text */
-      --color-gray-600: #4b5563;       /* Body text */
-      --color-gray-700: #374151;       /* Headings */
-      --color-gray-800: #1f2937;       /* Dark text */
-      --color-gray-900: #111827;       /* Darkest text */
-      
-      /* Spacing Scale */
-      --space-1: 0.25rem;  /* 4px */
-      --space-2: 0.5rem;   /* 8px */
-      --space-3: 0.75rem;  /* 12px */
-      --space-4: 1rem;     /* 16px */
-      --space-5: 1.25rem;  /* 20px */
-      --space-6: 1.5rem;   /* 24px */
-      --space-8: 2rem;     /* 32px */
-      --space-10: 2.5rem;  /* 40px */
-      --space-12: 3rem;    /* 48px */
-      
-      /* Typography */
-      --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 
-                     'Helvetica Neue', Arial, sans-serif;
-      --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, 
-                   'Cascadia Code', monospace;
-      
-      --text-xs: 0.75rem;    /* 12px */
-      --text-sm: 0.875rem;   /* 14px */
-      --text-base: 1rem;     /* 16px */
-      --text-lg: 1.125rem;   /* 18px */
-      --text-xl: 1.25rem;    /* 20px */
-      --text-2xl: 1.5rem;    /* 24px */
-      --text-3xl: 1.875rem;  /* 30px */
-      
-      /* Border Radius */
-      --radius-sm: 0.25rem;  /* 4px */
-      --radius-md: 0.375rem; /* 6px */
-      --radius-lg: 0.5rem;   /* 8px */
-      --radius-xl: 0.75rem;  /* 12px */
-      
-      /* Shadows */
-      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 
-                   0 2px 4px -2px rgb(0 0 0 / 0.1);
-      --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 
-                   0 4px 6px -4px rgb(0 0 0 / 0.1);
-      
-      /* Transitions */
-      --transition-fast: 150ms ease;
-      --transition-normal: 200ms ease;
-      --transition-slow: 300ms ease;
-    }
-
-    /*
-    ==========================================================================
-    FIX #3: CSS Reset and Base Styles
-    
-    WHY: Browser default styles vary. A minimal reset ensures consistent
-    rendering across Chrome, Firefox, Safari, and Edge.
-    
-    IMPLEMENTATION: Apply box-sizing and remove default margins/padding.
-    ==========================================================================
-    */
-    *, *::before, *::after {
-      box-sizing: border-box;
-    }
-    
-    * {
-      margin: 0;
-      padding: 0;
-    }
-
-    /*
-    ==========================================================================
-    FIX #4: Improved Body Styles
-    
-    WHY: Original had minimal body styling. These improvements ensure:
-    - Readable line height for better text scanning
-    - Subtle background color to reduce eye strain
-    - Anti-aliased font rendering for crisper text
-    
-    IMPLEMENTATION: Apply to body element.
-    ==========================================================================
-    */
-    body {
-      font-family: var(--font-family);
-      font-size: var(--text-base);
-      line-height: 1.6;
-      color: var(--color-gray-700);
-      background-color: var(--color-gray-50);
-      min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-    /*
-    ==========================================================================
-    FIX #5: Container with Max-Width
-    
-    WHY: Original UI stretched to full width on large screens, making it
-    hard to read. Max-width constraint improves readability and focus.
-    
-    IMPLEMENTATION: Wrap all content in a .container div.
-    ==========================================================================
-    */
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: var(--space-6);
-    }
-
-    /*
-    ==========================================================================
-    FIX #6: Header Component
-    
-    WHY: Original had a plain h1. A proper header with description helps
-    users understand the page purpose immediately.
-    
-    IMPLEMENTATION: Create a header section with title and subtitle.
-    ==========================================================================
-    */
-    .page-header {
-      margin-bottom: var(--space-8);
-      padding-bottom: var(--space-6);
-      border-bottom: 1px solid var(--color-gray-200);
-    }
-    
-    .page-header h1 {
-      font-size: var(--text-3xl);
-      font-weight: 700;
-      color: var(--color-gray-900);
-      margin-bottom: var(--space-2);
-    }
-    
-    .page-header p {
-      color: var(--color-gray-500);
-      font-size: var(--text-base);
-    }
-
-    /*
-    ==========================================================================
-    FIX #7: Card Component System
-    
-    WHY: Original used basic divs with borders. Cards provide visual
-    hierarchy, group related content, and add depth to the interface.
-    
-    IMPLEMENTATION: Use .card class for upload form, file list, and mapping editor.
-    ==========================================================================
-    */
-    .card {
-      background: white;
-      border-radius: var(--radius-lg);
-      border: 1px solid var(--color-gray-200);
-      box-shadow: var(--shadow-sm);
-      padding: var(--space-6);
-      margin-bottom: var(--space-6);
-    }
-    
-    .card-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: var(--space-4);
-      padding-bottom: var(--space-4);
-      border-bottom: 1px solid var(--color-gray-100);
-    }
-    
-    .card-header h2 {
-      font-size: var(--text-xl);
-      font-weight: 600;
-      color: var(--color-gray-800);
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-    }
-    
-    .card-header .icon {
-      width: 24px;
-      height: 24px;
-      color: var(--color-primary);
-    }
-
-    /*
-    ==========================================================================
-    FIX #8: Form Controls Styling
-    
-    WHY: Original form inputs were browser-default styled, looking outdated
-    and inconsistent across browsers.
-    
-    IMPLEMENTATION: Apply consistent styling to all form elements.
-    ==========================================================================
-    */
-    .form-group {
-      margin-bottom: var(--space-4);
-    }
-    
-    .form-label {
-      display: block;
-      font-size: var(--text-sm);
-      font-weight: 500;
-      color: var(--color-gray-700);
-      margin-bottom: var(--space-2);
-    }
-    
-    .form-label .required {
-      color: var(--color-danger);
-      margin-left: var(--space-1);
-    }
-    
-    .form-input,
-    .form-select {
-      display: block;
-      width: 100%;
-      padding: var(--space-3) var(--space-4);
-      font-size: var(--text-base);
-      font-family: inherit;
-      color: var(--color-gray-700);
-      background-color: white;
-      border: 1px solid var(--color-gray-300);
-      border-radius: var(--radius-md);
-      transition: border-color var(--transition-fast), 
-                  box-shadow var(--transition-fast);
-    }
-    
-    .form-input:hover,
-    .form-select:hover {
-      border-color: var(--color-gray-400);
-    }
-    
-    .form-input:focus,
-    .form-select:focus {
-      outline: none;
-      border-color: var(--color-primary);
-      box-shadow: 0 0 0 3px var(--color-primary-light);
-    }
-    
-    .form-input::placeholder {
-      color: var(--color-gray-400);
-    }
-    
-    /* File input specific styling */
-    .form-input[type="file"] {
-      padding: var(--space-2);
-      cursor: pointer;
-    }
-    
-    .form-input[type="file"]::file-selector-button {
-      padding: var(--space-2) var(--space-4);
-      margin-right: var(--space-4);
-      background: var(--color-gray-100);
-      border: 1px solid var(--color-gray-300);
-      border-radius: var(--radius-sm);
-      font-weight: 500;
-      cursor: pointer;
-      transition: background-color var(--transition-fast);
-    }
-    
-    .form-input[type="file"]::file-selector-button:hover {
-      background: var(--color-gray-200);
-    }
-    
-    .form-help {
-      font-size: var(--text-sm);
-      color: var(--color-gray-500);
-      margin-top: var(--space-1);
-    }
-
-    /*
-    ==========================================================================
-    FIX #9: Button System
-    
-    WHY: Original had unstyled buttons. A proper button system provides:
-    - Visual hierarchy (primary, secondary, danger)
-    - Clear affordance (users know it's clickable)
-    - Loading and disabled states
-    
-    IMPLEMENTATION: Use .btn with modifier classes (.btn-primary, etc.)
-    ==========================================================================
-    */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: var(--space-2);
-      padding: var(--space-3) var(--space-5);
-      font-size: var(--text-sm);
-      font-weight: 500;
-      font-family: inherit;
-      line-height: 1;
-      text-decoration: none;
-      border: 1px solid transparent;
-      border-radius: var(--radius-md);
-      cursor: pointer;
-      transition: all var(--transition-fast);
-      white-space: nowrap;
-    }
-    
-    .btn:focus {
-      outline: none;
-      box-shadow: 0 0 0 3px var(--color-primary-light);
-    }
-    
-    .btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-    
-    /* Primary button - main actions */
-    .btn-primary {
-      background-color: var(--color-primary);
-      color: white;
-    }
-    
-    .btn-primary:hover:not(:disabled) {
-      background-color: var(--color-primary-hover);
-    }
-    
-    /* Secondary button - less important actions */
-    .btn-secondary {
-      background-color: white;
-      color: var(--color-gray-700);
-      border-color: var(--color-gray-300);
-    }
-    
-    .btn-secondary:hover:not(:disabled) {
-      background-color: var(--color-gray-50);
-      border-color: var(--color-gray-400);
-    }
-    
-    /* Success button - confirmations */
-    .btn-success {
-      background-color: var(--color-success);
-      color: white;
-    }
-    
-    .btn-success:hover:not(:disabled) {
-      background-color: #047857;
-    }
-    
-    /* Danger button - destructive actions */
-    .btn-danger {
-      background-color: var(--color-danger);
-      color: white;
-    }
-    
-    .btn-danger:hover:not(:disabled) {
-      background-color: #b91c1c;
-    }
-    
-    /* Small button variant */
-    .btn-sm {
-      padding: var(--space-2) var(--space-3);
-      font-size: var(--text-xs);
-    }
-
-    /*
-    ==========================================================================
-    FIX #10: Table Improvements
-    
-    WHY: Original table was basic and hard to scan. Improvements include:
-    - Sticky header for long lists
-    - Hover states for row identification
-    - Better cell padding
-    - Responsive scrolling
-    
-    IMPLEMENTATION: Wrap table in .table-container for horizontal scroll.
-    ==========================================================================
-    */
-    .table-container {
-      overflow-x: auto;
-      border-radius: var(--radius-lg);
-      border: 1px solid var(--color-gray-200);
-    }
-    
-    .table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: var(--text-sm);
-    }
-    
-    .table th {
-      background-color: var(--color-gray-50);
-      padding: var(--space-3) var(--space-4);
-      text-align: left;
-      font-weight: 600;
-      color: var(--color-gray-600);
-      text-transform: uppercase;
-      font-size: var(--text-xs);
-      letter-spacing: 0.05em;
-      border-bottom: 1px solid var(--color-gray-200);
-      position: sticky;
-      top: 0;
-    }
-    
-    .table td {
-      padding: var(--space-4);
-      border-bottom: 1px solid var(--color-gray-100);
-      color: var(--color-gray-700);
-    }
-    
-    .table tbody tr:hover {
-      background-color: var(--color-gray-50);
-    }
-    
-    .table tbody tr:last-child td {
-      border-bottom: none;
-    }
-    
-    /* File key column - monospace for readability */
-    .table .file-key {
-      font-family: var(--font-mono);
-      font-size: var(--text-xs);
-      word-break: break-all;
-      max-width: 400px;
-    }
-
-    /*
-    ==========================================================================
-    FIX #11: Status Badge System
-    
-    WHY: Original badges were basic colored spans. Improved badges have:
-    - Clear visual distinction between states
-    - Icons for quick recognition
-    - Consistent sizing
-    
-    IMPLEMENTATION: Use .badge with status modifier classes.
-    ==========================================================================
-    */
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-1);
-      padding: var(--space-1) var(--space-3);
-      font-size: var(--text-xs);
-      font-weight: 600;
-      border-radius: 9999px;
-      text-transform: uppercase;
-      letter-spacing: 0.025em;
-    }
-    
-    .badge-pending {
-      background-color: var(--color-warning-light);
-      color: var(--color-warning);
-    }
-    
-    .badge-ready {
-      background-color: var(--color-success-light);
-      color: var(--color-success);
-    }
-    
-    .badge-error {
-      background-color: var(--color-danger-light);
-      color: var(--color-danger);
-    }
-    
-    .badge-processing {
-      background-color: var(--color-primary-light);
-      color: var(--color-primary);
-    }
-    
-    /* Dot indicator in badges */
-    .badge::before {
-      content: '';
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background-color: currentColor;
-    }
-
-    /*
-    ==========================================================================
-    FIX #12: Toast Notification System
-    
-    WHY: Original used browser alert() which blocks the UI and looks dated.
-    Toast notifications are non-blocking and more user-friendly.
-    
-    IMPLEMENTATION: Add toast container and call showToast() function.
-    ==========================================================================
-    */
-    .toast-container {
-      position: fixed;
-      top: var(--space-6);
-      right: var(--space-6);
-      z-index: 1000;
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-3);
-    }
-    
-    .toast {
-      display: flex;
-      align-items: flex-start;
-      gap: var(--space-3);
-      padding: var(--space-4);
-      background: white;
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-lg);
-      border-left: 4px solid var(--color-gray-400);
-      max-width: 400px;
-      animation: slideIn 0.3s ease;
-    }
-    
-    .toast-success {
-      border-left-color: var(--color-success);
-    }
-    
-    .toast-error {
-      border-left-color: var(--color-danger);
-    }
-    
-    .toast-warning {
-      border-left-color: var(--color-warning);
-    }
-    
-    .toast-info {
-      border-left-color: var(--color-primary);
-    }
-    
-    .toast-content {
-      flex: 1;
-    }
-    
-    .toast-title {
-      font-weight: 600;
-      color: var(--color-gray-800);
-      margin-bottom: var(--space-1);
-    }
-    
-    .toast-message {
-      font-size: var(--text-sm);
-      color: var(--color-gray-600);
-    }
-    
-    .toast-close {
-      background: none;
-      border: none;
-      color: var(--color-gray-400);
-      cursor: pointer;
-      padding: var(--space-1);
-      line-height: 1;
-    }
-    
-    .toast-close:hover {
-      color: var(--color-gray-600);
-    }
-    
-    @keyframes slideIn {
-      from {
-        transform: translateX(100%);
-        opacity: 0;
-      }
-      to {
-        transform: translateX(0);
-        opacity: 1;
-      }
-    }
-    
-    @keyframes slideOut {
-      from {
-        transform: translateX(0);
-        opacity: 1;
-      }
-      to {
-        transform: translateX(100%);
-        opacity: 0;
-      }
-    }
-
-    /*
-    ==========================================================================
-    FIX #13: Loading Spinner
-    
-    WHY: Original had no loading indicators. Users had no feedback during
-    async operations like uploads and API calls.
-    
-    IMPLEMENTATION: Add .spinner element inside buttons during loading.
-    ==========================================================================
-    */
-    .spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid transparent;
-      border-top-color: currentColor;
-      border-radius: 50%;
-      animation: spin 0.6s linear infinite;
-    }
-    
-    .spinner-lg {
-      width: 32px;
-      height: 32px;
-      border-width: 3px;
-    }
-    
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    
-    /* Loading overlay for sections */
-    .loading-overlay {
-      position: absolute;
-      inset: 0;
-      background: rgba(255, 255, 255, 0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: inherit;
-    }
-
-    /*
-    ==========================================================================
-    FIX #14: Empty State Component
-    
-    WHY: Original showed an empty table when no files existed. An empty state
-    with guidance improves UX and encourages action.
-    
-    IMPLEMENTATION: Show .empty-state when files array is empty.
-    ==========================================================================
-    */
-    .empty-state {
-      text-align: center;
-      padding: var(--space-12) var(--space-6);
-      color: var(--color-gray-500);
-    }
-    
-    .empty-state-icon {
-      width: 64px;
-      height: 64px;
-      margin: 0 auto var(--space-4);
-      color: var(--color-gray-300);
-    }
-    
-    .empty-state-title {
-      font-size: var(--text-lg);
-      font-weight: 600;
-      color: var(--color-gray-700);
-      margin-bottom: var(--space-2);
-    }
-    
-    .empty-state-description {
-      font-size: var(--text-sm);
-      max-width: 400px;
-      margin: 0 auto;
-    }
-
-    /*
-    ==========================================================================
-    FIX #15: Mapping Editor Improvements
-    
-    WHY: Original mapping form was basic. Improvements include:
-    - Better visual hierarchy
-    - Column preview showing sample data
-    - Clear save/cancel actions
-    
-    IMPLEMENTATION: Enhanced .mapping-form structure.
-    ==========================================================================
-    */
-    .mapping-form {
-      position: relative;
-    }
-    
-    .mapping-form-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: var(--space-6);
-      padding-bottom: var(--space-4);
-      border-bottom: 1px solid var(--color-gray-200);
-    }
-    
-    .mapping-form-title {
-      font-size: var(--text-lg);
-      font-weight: 600;
-      color: var(--color-gray-800);
-    }
-    
-    .mapping-form-subtitle {
-      font-size: var(--text-sm);
-      color: var(--color-gray-500);
-      font-family: var(--font-mono);
-      word-break: break-all;
-    }
-    
-    .mapping-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: var(--space-4);
-      margin-bottom: var(--space-6);
-    }
-    
-    .mapping-field {
-      background: var(--color-gray-50);
-      padding: var(--space-4);
-      border-radius: var(--radius-md);
-      border: 1px solid var(--color-gray-200);
-    }
-    
-    .mapping-field-label {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      font-weight: 500;
-      color: var(--color-gray-700);
-      margin-bottom: var(--space-3);
-    }
-    
-    .mapping-field-label .icon {
-      width: 18px;
-      height: 18px;
-      color: var(--color-primary);
-    }
-    
-    .mapping-actions {
-      display: flex;
-      gap: var(--space-3);
-      justify-content: flex-end;
-      padding-top: var(--space-4);
-      border-top: 1px solid var(--color-gray-200);
-    }
-
-    /*
-    ==========================================================================
-    FIX #16: Responsive Design
-    
-    WHY: Original had no responsive styles. The UI should work on tablets
-    and smaller screens for flexibility.
-    
-    IMPLEMENTATION: Add media queries for smaller screens.
-    ==========================================================================
-    */
-    @media (max-width: 768px) {
-      .container {
-        padding: var(--space-4);
-      }
-      
-      .page-header h1 {
-        font-size: var(--text-2xl);
-      }
-      
-      .card {
-        padding: var(--space-4);
-      }
-      
-      .table th,
-      .table td {
-        padding: var(--space-2) var(--space-3);
-      }
-      
-      .table .file-key {
-        max-width: 200px;
-      }
-      
-      .mapping-grid {
-        grid-template-columns: 1fr;
-      }
-      
-      .toast-container {
-        left: var(--space-4);
-        right: var(--space-4);
-      }
-      
-      .toast {
-        max-width: none;
-      }
-    }
-
-    /*
-    ==========================================================================
-    FIX #17: Print Styles
-    
-    WHY: Admin tools are sometimes printed for documentation or auditing.
-    
-    IMPLEMENTATION: Hide non-essential elements and optimize for print.
-    ==========================================================================
-    */
-    @media print {
-      .toast-container,
-      .btn,
-      .upload-form {
-        display: none !important;
-      }
-      
-      .card {
-        box-shadow: none;
-        border: 1px solid #000;
-        break-inside: avoid;
-      }
-    }
-
-    /*
-    ==========================================================================
-    FIX #18: Focus Visible for Keyboard Navigation
-    
-    WHY: Accessibility improvement - visible focus states help keyboard
-    users navigate the interface.
-    
-    IMPLEMENTATION: Use :focus-visible for keyboard-only focus styling.
-    ==========================================================================
-    */
-    :focus-visible {
-      outline: 2px solid var(--color-primary);
-      outline-offset: 2px;
-    }
-    
-    /* Remove default focus for mouse users */
-    :focus:not(:focus-visible) {
-      outline: none;
-    }
-
-    /*
-    ==========================================================================
-    FIX #19: Utility Classes
-    
-    WHY: Small utility classes reduce repetitive CSS and improve consistency.
-    
-    IMPLEMENTATION: Use for spacing, text, and visibility needs.
-    ==========================================================================
-    */
-    .sr-only {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-    }
-    
-    .text-center { text-align: center; }
-    .text-right { text-align: right; }
-    .text-muted { color: var(--color-gray-500); }
-    .text-sm { font-size: var(--text-sm); }
-    .mt-2 { margin-top: var(--space-2); }
-    .mt-4 { margin-top: var(--space-4); }
-    .mb-4 { margin-bottom: var(--space-4); }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f9fafb; color: #374151; line-height: 1.6; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 1.875rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
+    .subtitle { color: #6b7280; margin-bottom: 32px; }
+    .card { background: white; border-radius: 8px; border: 1px solid #e5e7eb; padding: 24px; margin-bottom: 24px; }
+    .card h2 { font-size: 1.25rem; font-weight: 600; color: #1f2937; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #f3f4f6; }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 8px; }
+    input, select { width: 100%; padding: 12px; font-size: 1rem; border: 1px solid #d1d5db; border-radius: 6px; }
+    input:focus, select:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px #dbeafe; }
+    .help { font-size: 0.875rem; color: #6b7280; margin-top: 4px; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; font-size: 0.875rem; font-weight: 500; border: none; border-radius: 6px; cursor: pointer; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-secondary { background: white; color: #374151; border: 1px solid #d1d5db; }
+    .btn-secondary:hover { background: #f9fafb; }
+    .btn-success { background: #059669; color: white; }
+    .btn-sm { padding: 8px 12px; font-size: 0.75rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th { background: #f9fafb; padding: 12px; text-align: left; font-weight: 600; color: #4b5563; text-transform: uppercase; font-size: 0.75rem; border-bottom: 1px solid #e5e7eb; }
+    td { padding: 16px 12px; border-bottom: 1px solid #f3f4f6; }
+    tr:hover { background: #f9fafb; }
+    .file-key { font-family: monospace; font-size: 0.75rem; word-break: break-all; }
+    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; font-size: 0.75rem; font-weight: 600; border-radius: 9999px; text-transform: uppercase; }
+    .badge-pending { background: #fef3c7; color: #d97706; }
+    .badge-ready { background: #d1fae5; color: #059669; }
+    .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .empty { text-align: center; padding: 48px; color: #6b7280; }
+    .toast-container { position: fixed; top: 24px; right: 24px; z-index: 1000; }
+    .toast { display: flex; gap: 12px; padding: 16px; background: white; border-radius: 8px; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); border-left: 4px solid #6b7280; margin-bottom: 12px; max-width: 400px; }
+    .toast-success { border-left-color: #059669; }
+    .toast-error { border-left-color: #dc2626; }
+    .toast-title { font-weight: 600; color: #1f2937; }
+    .toast-message { font-size: 0.875rem; color: #4b5563; }
+    .spinner { width: 16px; height: 16px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .mapping-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .mapping-field { background: #f9fafb; padding: 16px; border-radius: 6px; border: 1px solid #e5e7eb; }
+    .mapping-actions { display: flex; gap: 12px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid #e5e7eb; }
   </style>
 </head>
-
 <body>
-  <!-- Toast Container for Notifications -->
-  <div id="toast-container" class="toast-container" role="alert" aria-live="polite"></div>
-
+  <div id="toast-container" class="toast-container"></div>
   <div class="container">
-    <!--
-    ==========================================================================
-    FIX #20: Enhanced Page Header
-    
-    WHY: Provides context and branding for the admin tool.
-    ==========================================================================
-    -->
-    <header class="page-header">
-      <h1>CSV Column Mapping</h1>
-      <p>Upload CSV files and configure column mappings for the WooCommerce product updater.</p>
-    </header>
+    <h1>CSV Column Mapping</h1>
+    <p class="subtitle">Upload CSV files and configure column mappings for the WooCommerce product updater.</p>
 
-    <!--
-    ==========================================================================
-    FIX #21: Upload Form Card
-    
-    WHY: Grouped in a card for visual hierarchy. Added validation and
-    better file input styling.
-    ==========================================================================
-    -->
-    <section class="card" aria-labelledby="upload-heading">
-      <div class="card-header">
-        <h2 id="upload-heading">
-          <!-- Upload Icon (inline SVG for no external dependencies) -->
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="17 8 12 3 7 8"/>
-            <line x1="12" y1="3" x2="12" y2="15"/>
-          </svg>
-          Upload CSV File
-        </h2>
-      </div>
-      
+    <div class="card">
+      <h2>Upload CSV File</h2>
       <form id="upload-form">
         <div class="form-group">
-          <label class="form-label" for="file">
-            CSV File
-            <span class="required" aria-hidden="true">*</span>
-          </label>
-          <input 
-            type="file" 
-            id="file" 
-            name="file" 
-            class="form-input"
-            accept=".csv,text/csv"
-            required
-            aria-describedby="file-help"
-          />
-          <p id="file-help" class="form-help">
-            Upload a CSV file containing product data. Maximum file size: 50MB.
-          </p>
+          <label for="file">CSV File *</label>
+          <input type="file" id="file" name="file" accept=".csv" required>
+          <p class="help">Upload a CSV file containing product data.</p>
         </div>
-        
         <div class="form-group">
-          <label class="form-label" for="folder">
-            S3 Folder (Optional)
-          </label>
-          <input
-            type="text"
-            id="folder"
-            name="folder"
-            class="form-input"
-            placeholder="e.g., vendor-uploads/2025/"
-            aria-describedby="folder-help"
-          />
-          <p id="folder-help" class="form-help">
-            Optional S3 folder path. If left empty, files will be uploaded to 
-            <code>ui-uploads/YYYYMMDD/</code>
-          </p>
+          <label for="folder">S3 Folder (Optional)</label>
+          <input type="text" id="folder" name="folder" placeholder="e.g., vendor-uploads/2025/">
+          <p class="help">Optional S3 folder path.</p>
         </div>
-        
-        <button type="submit" id="upload-btn" class="btn btn-primary">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="17 8 12 3 7 8"/>
-            <line x1="12" y1="3" x2="12" y2="15"/>
-          </svg>
-          Upload to S3
-        </button>
+        <button type="submit" id="upload-btn" class="btn btn-primary">Upload to S3</button>
       </form>
-    </section>
+    </div>
 
-    <!--
-    ==========================================================================
-    FIX #22: Files List Card
-    
-    WHY: Improved table with empty state, loading states, and better styling.
-    ==========================================================================
-    -->
-    <section class="card" aria-labelledby="files-heading">
-      <div class="card-header">
-        <h2 id="files-heading">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="16" y1="13" x2="8" y2="13"/>
-            <line x1="16" y1="17" x2="8" y2="17"/>
-            <polyline points="10 9 9 9 8 9"/>
-          </svg>
-          Registered Files
-        </h2>
-        <button id="refresh-btn" class="btn btn-secondary btn-sm" type="button">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M23 4v6h-6"/>
-            <path d="M1 20v-6h6"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-          </svg>
-          Refresh
-        </button>
-      </div>
-      
-      <div id="files-wrapper">
-        <!-- Files table or empty state will be rendered here -->
-        <div class="loading-state text-center" style="padding: 2rem;">
-          <div class="spinner spinner-lg" style="margin: 0 auto; border-top-color: var(--color-primary);"></div>
-          <p class="text-muted mt-4">Loading files...</p>
-        </div>
-      </div>
-    </section>
+    <div class="card">
+      <h2 style="display: flex; justify-content: space-between; align-items: center;">
+        Registered Files
+        <button id="refresh-btn" class="btn btn-secondary btn-sm">Refresh</button>
+      </h2>
+      <div id="files-wrapper"><div class="empty"><p>Loading...</p></div></div>
+    </div>
 
-    <!--
-    ==========================================================================
-    FIX #23: Mapping Editor Section
-    
-    WHY: Separate section for the mapping editor with better UX.
-    ==========================================================================
-    -->
-    <section id="mapping-container" aria-labelledby="mapping-heading">
-      <!-- Mapping editor will be dynamically inserted here -->
-    </section>
+    <div id="mapping-container"></div>
   </div>
 
   <script>
-    /*
-    ==========================================================================
-    JAVASCRIPT IMPROVEMENTS
-    ==========================================================================
-    
-    This section contains all JavaScript with detailed comments explaining
-    each improvement and how to implement them.
-    */
-
-    // =======================================================================
-    // FIX #24: Constants and Configuration
-    //
-    // WHY: Magic strings scattered throughout code are hard to maintain.
-    // Centralizing them makes updates easier and prevents typos.
-    //
-    // IMPLEMENTATION: Define all API endpoints and messages at the top.
-    // =======================================================================
-    const CONFIG = {
-      API: {
-        MAPPINGS: '/api/csv-mappings',
-        UPLOAD: '/api/upload-csv',
-      },
-      TOAST_DURATION: 5000,
-      DEBOUNCE_DELAY: 300,
-    };
-
-    const MESSAGES = {
-      UPLOAD_SUCCESS: 'File uploaded and registered successfully!',
-      UPLOAD_ERROR: 'Failed to upload file. Please try again.',
-      MAPPING_SUCCESS: 'Column mapping saved successfully!',
-      MAPPING_ERROR: 'Failed to save mapping. Please try again.',
-      FETCH_ERROR: 'Failed to load files. Please refresh the page.',
-      NO_FILE_SELECTED: 'Please select a CSV file to upload.',
-      NETWORK_ERROR: 'Network error. Please check your connection.',
-    };
-
-    // =======================================================================
-    // FIX #25: Toast Notification System
-    //
-    // WHY: Replace browser alert() with non-blocking toast notifications.
-    // Toasts provide feedback without interrupting user workflow.
-    //
-    // IMPLEMENTATION: Call showToast(message, type) where type is
-    // 'success', 'error', 'warning', or 'info'.
-    // =======================================================================
-    function showToast(message, type = 'info', title = null) {
-      const container = document.getElementById('toast-container');
-      
-      const toast = document.createElement('div');
-      toast.className = `toast toast-${type}`;
-      toast.setAttribute('role', 'alert');
-      
-      // Auto-generate title based on type if not provided
-      const displayTitle = title || {
-        success: 'Success',
-        error: 'Error',
-        warning: 'Warning',
-        info: 'Info',
-      }[type];
-      
-      toast.innerHTML = `
-        <div class="toast-content">
-          <div class="toast-title">${displayTitle}</div>
-          <div class="toast-message">${message}</div>
-        </div>
-        <button class="toast-close" aria-label="Close notification">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
-      `;
-      
-      // Close button handler
-      const closeBtn = toast.querySelector('.toast-close');
-      closeBtn.addEventListener('click', () => removeToast(toast));
-      
-      container.appendChild(toast);
-      
-      // Auto-remove after duration
-      setTimeout(() => removeToast(toast), CONFIG.TOAST_DURATION);
-      
-      return toast;
-    }
-    
-    function removeToast(toast) {
-      if (!toast || !toast.parentNode) return;
-      
-      toast.style.animation = 'slideOut 0.3s ease forwards';
-      setTimeout(() => {
-        if (toast.parentNode) {
-          toast.parentNode.removeChild(toast);
-        }
-      }, 300);
+    function showToast(msg, type) {
+      var c = document.getElementById('toast-container');
+      var t = document.createElement('div');
+      t.className = 'toast toast-' + type;
+      t.innerHTML = '<div><div class="toast-title">' + (type === 'success' ? 'Success' : type === 'error' ? 'Error' : 'Info') + '</div><div class="toast-message">' + msg + '</div></div>';
+      c.appendChild(t);
+      setTimeout(function() { t.remove(); }, 5000);
     }
 
-    // =======================================================================
-    // FIX #26: Loading State Management
-    //
-    // WHY: Users need feedback during async operations. Loading states
-    // prevent double-submissions and indicate progress.
-    //
-    // IMPLEMENTATION: Call setLoading(button, true) before async operations
-    // and setLoading(button, false) when complete.
-    // =======================================================================
-    function setLoading(button, isLoading, originalText = null) {
-      if (isLoading) {
-        button.disabled = true;
-        button.dataset.originalText = button.innerHTML;
-        button.innerHTML = `<span class="spinner"></span> Loading...`;
-      } else {
-        button.disabled = false;
-        button.innerHTML = button.dataset.originalText || originalText || 'Submit';
-      }
+    function setLoading(btn, loading) {
+      if (loading) { btn.disabled = true; btn.dataset.orig = btn.innerHTML; btn.innerHTML = '<span class="spinner"></span> Loading...'; }
+      else { btn.disabled = false; btn.innerHTML = btn.dataset.orig; }
     }
 
-    // =======================================================================
-    // FIX #27: API Helper with Error Handling
-    //
-    // WHY: Centralized API calls with consistent error handling reduce
-    // code duplication and ensure all errors are caught.
-    //
-    // IMPLEMENTATION: Use apiRequest() for all fetch calls.
-    // =======================================================================
-    async function apiRequest(url, options = {}) {
-      try {
-        const response = await fetch(url, {
-          ...options,
-          headers: {
-            ...options.headers,
-          },
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        return await response.json();
-      } catch (error) {
-        // Check if it's a network error
-        if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
-          throw new Error(MESSAGES.NETWORK_ERROR);
-        }
-        throw error;
-      }
-    }
+    function escapeHtml(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+    function escapeJs(t) { return String(t||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"'); }
 
-    // =======================================================================
-    // FIX #28: Fetch Files Function
-    //
-    // WHY: Original had no error handling. This version catches errors
-    // and shows appropriate feedback.
-    //
-    // IMPLEMENTATION: Returns array of files or empty array on error.
-    // =======================================================================
     async function fetchFiles() {
       try {
-        const data = await apiRequest(CONFIG.API.MAPPINGS);
-        return Array.isArray(data) ? data : [];
-      } catch (error) {
-        console.error('Error fetching files:', error);
-        showToast(MESSAGES.FETCH_ERROR, 'error');
-        return [];
-      }
+        var r = await fetch('/api/csv-mappings');
+        return r.ok ? await r.json() : [];
+      } catch (e) { showToast('Failed to load files', 'error'); return []; }
     }
 
-    // =======================================================================
-    // FIX #29: Fetch Single File Function
-    //
-    // WHY: Fetches detailed info for mapping editor with error handling.
-    //
-    // IMPLEMENTATION: Returns file object or null on error.
-    // =======================================================================
-    async function fetchFile(fileKey) {
-      try {
-        return await apiRequest(`${CONFIG.API.MAPPINGS}/${encodeURIComponent(fileKey)}`);
-      } catch (error) {
-        console.error('Error fetching file:', error);
-        showToast(`Failed to load file: ${fileKey}`, 'error');
-        return null;
-      }
-    }
-
-    // =======================================================================
-    // FIX #30: Render Files Function with Empty State
-    //
-    // WHY: Original showed empty table. This shows helpful empty state
-    // when no files exist.
-    //
-    // IMPLEMENTATION: Conditionally render table or empty state.
-    // =======================================================================
     function renderFiles(files) {
-      const wrapper = document.getElementById('files-wrapper');
-      
-      if (!files || files.length === 0) {
-        wrapper.innerHTML = `
-          <div class="empty-state">
-            <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-              <line x1="12" y1="18" x2="12" y2="12"/>
-              <line x1="9" y1="15" x2="15" y2="15"/>
-            </svg>
-            <h3 class="empty-state-title">No files registered yet</h3>
-            <p class="empty-state-description">
-              Upload a CSV file using the form above to get started. 
-              Files will appear here once they're registered.
-            </p>
-          </div>
-        `;
-        return;
-      }
-      
-      // Build table HTML
-      let tableHTML = `
-        <div class="table-container">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>File Key</th>
-                <th>Status</th>
-                <th>Uploaded</th>
-                <th class="text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-      `;
-      
-      files.forEach((file) => {
-        const statusClass = file.status === 'ready' ? 'badge-ready' : 'badge-pending';
-        const uploadDate = file.uploadedAt 
-          ? new Date(file.uploadedAt).toLocaleDateString('en-US', {
-              year: 'numeric',
-              month: 'short',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            })
-          : 'Unknown';
-        
-        // BUG FIX: Use escapeForJs() for onclick handler to prevent XSS
-        // The fileKey is inserted into a JavaScript string context, so we need
-        // JavaScript string escaping, not just HTML escaping.
-        tableHTML += `
-          <tr>
-            <td class="file-key" title="${escapeHtml(file.fileKey)}">${escapeHtml(file.fileKey)}</td>
-            <td><span class="badge ${statusClass}">${escapeHtml(file.status)}</span></td>
-            <td class="text-muted text-sm">${uploadDate}</td>
-            <td class="text-right">
-              <button 
-                type="button" 
-                class="btn btn-secondary btn-sm" 
-                onclick="loadMappingEditor('${escapeForJs(file.fileKey)}')"
-              >
-                Configure
-              </button>
-            </td>
-          </tr>
-        `;
+      var w = document.getElementById('files-wrapper');
+      if (!files || !files.length) { w.innerHTML = '<div class="empty"><p>No files registered yet. Upload a CSV file to get started.</p></div>'; return; }
+      var h = '<table><thead><tr><th>File Key</th><th>Status</th><th>Uploaded</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+      files.forEach(function(f) {
+        var d = f.uploadedAt ? new Date(f.uploadedAt).toLocaleDateString() : '-';
+        h += '<tr><td class="file-key">' + escapeHtml(f.fileKey) + '</td><td><span class="badge badge-' + f.status + '">' + f.status + '</span></td><td>' + d + '</td><td style="text-align:right"><button class="btn btn-secondary btn-sm" onclick="loadMapping(\'' + escapeJs(f.fileKey) + '\')">Configure</button></td></tr>';
       });
-      
-      tableHTML += `
-            </tbody>
-          </table>
-        </div>
-      `;
-      
-      wrapper.innerHTML = tableHTML;
+      w.innerHTML = h + '</tbody></table>';
     }
 
-    // =======================================================================
-    // FIX #31: HTML Escaping Utility
-    //
-    // WHY: Prevents XSS attacks by escaping user-provided content before
-    // inserting into HTML.
-    //
-    // BUG FIX (2025): Enhanced escaping for JavaScript string context
-    //
-    // PROBLEM:
-    // The original escapeHtml() only escaped for HTML context (< > & " ').
-    // When used in onclick handlers like onclick="fn('${escapeHtml(str)}')",
-    // certain characters could break out of the JavaScript string:
-    //   - Single quotes could end the string
-    //   - Backslashes could escape the closing quote
-    //   - Newlines could break the JavaScript
-    //
-    // THE FIX:
-    // Added escapeForJs() function that properly escapes for JavaScript
-    // string context. Use this when inserting into onclick/event handlers.
-    //
-    // IMPLEMENTATION: Use escapeHtml() for HTML content, escapeForJs() for
-    // JavaScript strings in event handlers.
-    // =======================================================================
-    function escapeHtml(text) {
-      if (!text) return '';
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    /**
-     * Escape a string for safe use inside JavaScript string literals.
-     * Use this when inserting values into onclick handlers or similar.
-     * 
-     * @param {string} text - The text to escape
-     * @returns {string} Escaped text safe for JS string context
-     * 
-     * @example
-     * // Safe: onclick="fn('${escapeForJs(userInput)}')"
-     */
-    function escapeForJs(text) {
-      if (!text) return '';
-      return String(text)
-        .replace(/\\/g, '\\\\')     // Backslashes first!
-        .replace(/'/g, "\\'")       // Single quotes
-        .replace(/"/g, '\\"')       // Double quotes
-        .replace(/\n/g, '\\n')      // Newlines
-        .replace(/\r/g, '\\r')      // Carriage returns
-        .replace(/\t/g, '\\t')      // Tabs
-        .replace(/</g, '\\x3c')     // Less than (prevents </script> injection)
-        .replace(/>/g, '\\x3e');    // Greater than
-    }
-
-    // =======================================================================
-    // FIX #32: Mapping Editor Function
-    //
-    // WHY: Improved UI with better layout, icons, and clear actions.
-    // Also handles case where file is already ready.
-    //
-    // IMPLEMENTATION: Creates a grid layout for mapping fields.
-    // =======================================================================
-    async function loadMappingEditor(fileKey) {
-      const data = await fetchFile(fileKey);
-      if (!data) return;
-
-      const container = document.getElementById('mapping-container');
-      
-      // Create card for mapping editor
-      const card = document.createElement('div');
-      card.className = 'card mapping-form';
-      card.id = 'mapping-card';
-      
-      card.innerHTML = `
-        <div class="mapping-form-header">
-          <div>
-            <h2 id="mapping-heading" class="mapping-form-title">
-              <svg class="icon" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="16 18 22 12 16 6"/>
-                <polyline points="8 6 2 12 8 18"/>
-              </svg>
-              Configure Column Mapping
-            </h2>
-            <p class="mapping-form-subtitle mt-2">${escapeHtml(data.fileKey)}</p>
-          </div>
-          <button type="button" class="btn btn-secondary btn-sm" onclick="closeMappingEditor()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-            Close
-          </button>
-        </div>
-        
-        <p class="text-muted mb-4">
-          Select which CSV columns correspond to each required field. 
-          These mappings are used by the product updater to identify and categorize products.
-        </p>
-        
-        <form id="mapping-form">
-          <div class="mapping-grid">
-            ${createMappingField('partNumber', 'Part Number', 'Primary identifier for the product', data)}
-            ${createMappingField('category', 'Category', 'Product category for classification', data)}
-            ${createMappingField('manufacturer', 'Manufacturer', 'Product manufacturer name', data)}
-          </div>
-          
-          <div class="mapping-actions">
-            <button type="button" class="btn btn-secondary" onclick="closeMappingEditor()">
-              Cancel
-            </button>
-            <button type="submit" class="btn btn-success" id="save-mapping-btn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-              Save Mapping
-            </button>
-          </div>
-        </form>
-      `;
-      
-      container.innerHTML = '';
-      container.appendChild(card);
-      
-      // Store fileKey for form submission
-      container.dataset.fileKey = data.fileKey;
-      
-      // Attach form handler
-      document.getElementById('mapping-form').addEventListener('submit', handleMappingSubmit);
-      
-      // Scroll to editor
-      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-
-    // =======================================================================
-    // FIX #33: Create Mapping Field Helper
-    //
-    // WHY: DRY principle - reusable function for creating mapping fields.
-    //
-    // IMPLEMENTATION: Returns HTML string for a single mapping field.
-    // =======================================================================
-    function createMappingField(key, label, description, data) {
-      const headers = data.headers || [];
-      const currentValue = data.mapping?.[key] || '';
-      
-      let optionsHTML = headers.map(h => 
-        `<option value="${escapeHtml(h)}" ${h === currentValue ? 'selected' : ''}>${escapeHtml(h)}</option>`
-      ).join('');
-      
-      // Add empty option at the start
-      optionsHTML = `<option value="">-- Select Column --</option>` + optionsHTML;
-      
-      return `
-        <div class="mapping-field">
-          <label class="mapping-field-label" for="mapping-${key}">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="4" y1="9" x2="20" y2="9"/>
-              <line x1="4" y1="15" x2="20" y2="15"/>
-              <line x1="10" y1="3" x2="8" y2="21"/>
-              <line x1="16" y1="3" x2="14" y2="21"/>
-            </svg>
-            ${label}
-          </label>
-          <select id="mapping-${key}" name="${key}" class="form-select" required>
-            ${optionsHTML}
-          </select>
-          <p class="form-help">${description}</p>
-        </div>
-      `;
-    }
-
-    // =======================================================================
-    // FIX #34: Close Mapping Editor Function
-    //
-    // WHY: Provides clean way to dismiss the editor.
-    //
-    // IMPLEMENTATION: Clears the mapping container.
-    // =======================================================================
-    function closeMappingEditor() {
-      const container = document.getElementById('mapping-container');
-      container.innerHTML = '';
-      container.dataset.fileKey = '';
-    }
-
-    // =======================================================================
-    // FIX #35: Handle Mapping Form Submission
-    //
-    // WHY: Separated handler for cleaner code and better error handling.
-    //
-    // IMPLEMENTATION: Called on form submit, validates and sends to API.
-    // =======================================================================
-    async function handleMappingSubmit(event) {
-      event.preventDefault();
-      
-      const fileKey = document.getElementById('mapping-container').dataset.fileKey;
-      const btn = document.getElementById('save-mapping-btn');
-      
-      const payload = {
-        partNumber: document.getElementById('mapping-partNumber').value,
-        category: document.getElementById('mapping-category').value,
-        manufacturer: document.getElementById('mapping-manufacturer').value,
-      };
-      
-      // Validate all fields are selected
-      if (!payload.partNumber || !payload.category || !payload.manufacturer) {
-        showToast('Please select a column for each field.', 'warning');
-        return;
-      }
-      
-      setLoading(btn, true);
-      
+    async function loadMapping(fileKey) {
       try {
-        await apiRequest(`${CONFIG.API.MAPPINGS}/${encodeURIComponent(fileKey)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        
-        showToast(MESSAGES.MAPPING_SUCCESS, 'success');
-        closeMappingEditor();
-        await loadAndRenderFiles();
-        
-      } catch (error) {
-        console.error('Mapping save error:', error);
-        showToast(error.message || MESSAGES.MAPPING_ERROR, 'error');
-      } finally {
-        setLoading(btn, false);
-      }
+        var r = await fetch('/api/csv-mappings/' + encodeURIComponent(fileKey));
+        if (!r.ok) throw new Error();
+        var data = await r.json();
+        var c = document.getElementById('mapping-container');
+        var opts = '<option value="">-- Select --</option>' + (data.headers||[]).map(function(h) { return '<option value="' + escapeHtml(h) + '">' + escapeHtml(h) + '</option>'; }).join('');
+        c.innerHTML = '<div class="card"><h2>Configure Mapping: ' + escapeHtml(fileKey) + '</h2><form id="mapping-form"><div class="mapping-grid"><div class="mapping-field"><label>Part Number</label><select id="m-partNumber" required>' + opts + '</select></div><div class="mapping-field"><label>Category</label><select id="m-category" required>' + opts + '</select></div><div class="mapping-field"><label>Manufacturer</label><select id="m-manufacturer" required>' + opts + '</select></div></div><div class="mapping-actions"><button type="button" class="btn btn-secondary" onclick="closeMapping()">Cancel</button><button type="submit" id="save-btn" class="btn btn-success">Save Mapping</button></div></form></div>';
+        c.dataset.fileKey = fileKey;
+        if (data.mapping) {
+          if (data.mapping.partNumber) document.getElementById('m-partNumber').value = data.mapping.partNumber;
+          if (data.mapping.category) document.getElementById('m-category').value = data.mapping.category;
+          if (data.mapping.manufacturer) document.getElementById('m-manufacturer').value = data.mapping.manufacturer;
+        }
+        document.getElementById('mapping-form').onsubmit = saveMapping;
+      } catch (e) { showToast('Failed to load mapping', 'error'); }
     }
 
-    // =======================================================================
-    // FIX #36: Load and Render Files
-    //
-    // WHY: Combines fetch and render into single call for convenience.
-    //
-    // IMPLEMENTATION: Called on page load and after uploads.
-    // =======================================================================
-    async function loadAndRenderFiles() {
-      const files = await fetchFiles();
-      renderFiles(files);
+    function closeMapping() { document.getElementById('mapping-container').innerHTML = ''; }
+
+    async function saveMapping(e) {
+      e.preventDefault();
+      var btn = document.getElementById('save-btn');
+      var fileKey = document.getElementById('mapping-container').dataset.fileKey;
+      var payload = { partNumber: document.getElementById('m-partNumber').value, category: document.getElementById('m-category').value, manufacturer: document.getElementById('m-manufacturer').value };
+      if (!payload.partNumber || !payload.category || !payload.manufacturer) { showToast('Please select all fields', 'error'); return; }
+      setLoading(btn, true);
+      try {
+        var r = await fetch('/api/csv-mappings/' + encodeURIComponent(fileKey), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!r.ok) throw new Error();
+        showToast('Mapping saved!', 'success');
+        closeMapping();
+        renderFiles(await fetchFiles());
+      } catch (e) { showToast('Failed to save', 'error'); }
+      setLoading(btn, false);
     }
 
-    // =======================================================================
-    // FIX #37: Upload Form Handler with Validation
-    //
-    // WHY: Added validation, loading states, and proper error handling.
-    //
-    // IMPLEMENTATION: Attached to form submit event.
-    // =======================================================================
-    document.getElementById('upload-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      
-      const fileInput = document.getElementById('file');
-      const folderInput = document.getElementById('folder');
-      const btn = document.getElementById('upload-btn');
-      
-      // Validate file selection
-      if (!fileInput.files.length) {
-        showToast(MESSAGES.NO_FILE_SELECTED, 'warning');
-        fileInput.focus();
-        return;
-      }
-      
-      const file = fileInput.files[0];
-      
-      // Validate file type
-      if (!file.name.toLowerCase().endsWith('.csv')) {
-        showToast('Please select a valid CSV file.', 'warning');
-        fileInput.focus();
-        return;
-      }
-      
-      // Validate file size (50MB limit)
-      const maxSize = 50 * 1024 * 1024;
-      if (file.size > maxSize) {
-        showToast('File size exceeds 50MB limit.', 'warning');
-        return;
-      }
-      
+    document.getElementById('upload-form').onsubmit = async function(e) {
+      e.preventDefault();
+      var btn = document.getElementById('upload-btn');
+      var file = document.getElementById('file').files[0];
+      if (!file) { showToast('Select a file', 'error'); return; }
       setLoading(btn, true);
-      
       try {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        const folder = folderInput.value.trim();
-        if (folder) {
-          formData.append('folder', folder);
-        }
-        
-        const data = await fetch(CONFIG.API.UPLOAD, {
-          method: 'POST',
-          body: formData,
-        }).then(async (res) => {
-          if (!res.ok) {
-            const error = await res.json().catch(() => ({}));
-            throw new Error(error.error || 'Upload failed');
-          }
-          return res.json();
-        });
-        
-        showToast(`${MESSAGES.UPLOAD_SUCCESS} File key: ${data.fileKey}`, 'success', 'Upload Complete');
-        
-        // Clear form
-        fileInput.value = '';
-        folderInput.value = '';
-        
-        // Refresh file list
-        await loadAndRenderFiles();
-        
-      } catch (error) {
-        console.error('Upload error:', error);
-        showToast(error.message || MESSAGES.UPLOAD_ERROR, 'error');
-      } finally {
-        setLoading(btn, false);
-      }
-    });
+        var fd = new FormData();
+        fd.append('file', file);
+        var folder = document.getElementById('folder').value.trim();
+        if (folder) fd.append('folder', folder);
+        var r = await fetch('/api/upload-csv', { method: 'POST', body: fd });
+        if (!r.ok) throw new Error();
+        var data = await r.json();
+        showToast('Uploaded: ' + data.fileKey, 'success');
+        document.getElementById('file').value = '';
+        document.getElementById('folder').value = '';
+        renderFiles(await fetchFiles());
+      } catch (e) { showToast('Upload failed', 'error'); }
+      setLoading(btn, false);
+    };
 
-    // =======================================================================
-    // FIX #38: Refresh Button Handler
-    //
-    // WHY: Allows manual refresh of file list without page reload.
-    //
-    // IMPLEMENTATION: Attached to refresh button click.
-    // =======================================================================
-    document.getElementById('refresh-btn').addEventListener('click', async (event) => {
-      const btn = event.currentTarget;
-      setLoading(btn, true);
-      
-      try {
-        await loadAndRenderFiles();
-        showToast('File list refreshed.', 'info');
-      } finally {
-        setLoading(btn, false);
-      }
-    });
+    document.getElementById('refresh-btn').onclick = async function() {
+      setLoading(this, true);
+      renderFiles(await fetchFiles());
+      setLoading(this, false);
+    };
 
-    // =======================================================================
-    // FIX #39: Keyboard Shortcuts
-    //
-    // WHY: Power users appreciate keyboard shortcuts for common actions.
-    //
-    // IMPLEMENTATION: Listen for key combinations.
-    // =======================================================================
-    document.addEventListener('keydown', (event) => {
-      // Escape to close mapping editor
-      if (event.key === 'Escape') {
-        const mappingCard = document.getElementById('mapping-card');
-        if (mappingCard) {
-          closeMappingEditor();
-        }
-      }
-      
-      // Ctrl/Cmd + R to refresh (prevent browser refresh, do app refresh)
-      if ((event.ctrlKey || event.metaKey) && event.key === 'r') {
-        // Only prevent if not in an input
-        if (document.activeElement.tagName !== 'INPUT') {
-          event.preventDefault();
-          document.getElementById('refresh-btn').click();
-        }
-      }
-    });
-
-    // =======================================================================
-    // FIX #40: Initial Load
-    //
-    // WHY: Load files when page first loads.
-    //
-    // IMPLEMENTATION: Call on DOMContentLoaded.
-    // =======================================================================
-    document.addEventListener('DOMContentLoaded', () => {
-      loadAndRenderFiles();
-    });
-
-    // =======================================================================
-    // FIX #41: Global Error Handler
-    //
-    // WHY: Catch any unhandled errors and show user-friendly message.
-    //
-    // IMPLEMENTATION: Attach to window error event.
-    // =======================================================================
-    window.addEventListener('error', (event) => {
-      console.error('Global error:', event.error);
-      // Only show toast for JavaScript errors, not resource loading errors
-      if (event.error) {
-        showToast('An unexpected error occurred. Please refresh the page.', 'error');
-      }
-    });
-
-    window.addEventListener('unhandledrejection', (event) => {
-      console.error('Unhandled promise rejection:', event.reason);
-      showToast('An unexpected error occurred. Please try again.', 'error');
-    });
+    fetchFiles().then(renderFiles);
   </script>
 </body>
 </html>

@@ -177,7 +177,7 @@ function normalizeHeaderKey(rawKey) {
  */
 function getS3BucketName(mode) {
   if (mode === "test") {
-    return process.env.S3_TEST_BUCKET_NAME;
+    return process.env.S3_BUCKET_NAME_TEST;
   }
   return process.env.S3_BUCKET_NAME;
 }

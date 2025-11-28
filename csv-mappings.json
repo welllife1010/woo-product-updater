@@ -1,22 +1,39 @@
 {
   "files": [
     {
-      "fileKey": "ui-uploads/20250312/LED-Emitters-IR-UV-Visible.csv",
+      "fileKey": "woo-product-updater-test/11-27-2025-test/ledtech-test-nov-27-2025.csv",
       "status": "ready",
-      "headers": ["Part #", "Category", "Manufacturer", "Price", "Qty"],
+      "headers": [
+        "﻿Manufacturer Part Number*",
+        "Category",
+        "Mfr",
+        "Product Description*",
+        "Color",
+        "Configuration",
+        "Lens Color",
+        "Lens Transparency",
+        "Millicandela Rating",
+        "Lens Size",
+        "Voltage - Forward (Vf) (Typ)",
+        "Current - Test",
+        "Viewing Angle",
+        "Wavelength - Dominant",
+        "Wavelength - Peak",
+        "Size / Dimension",
+        "RoHS Compliance",
+        "REACH Compliance",
+        "HTS Code",
+        "ECCN",
+        "Moisture Sensitivity Level",
+        "Datasheet URL*",
+        "Image Attachment URL*"
+      ],
       "mapping": {
-        "partNumber": "Part #",
+        "partNumber": "﻿Manufacturer Part Number*",
         "category": "Category",
-        "manufacturer": "Manufacturer"
+        "manufacturer": "Mfr"
       },
-      "uploadedAt": "2025-03-12T10:23:45.123Z"
-    },
-    {
-      "fileKey": "ui-uploads/20250312/vendorX-mcus.csv",
-      "status": "pending",
-      "headers": ["part_num", "cat", "mfr_name"],
-      "mapping": null,
-      "uploadedAt": "2025-03-12T10:30:00.000Z"
+      "uploadedAt": "2025-11-27T11:37:42.433Z"
     }
   ]
 }

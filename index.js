@@ -33,12 +33,12 @@ logInfoToFile(`Running in ${executionMode} mode`);
 
 const getS3BucketName = (executionMode) => {
   return executionMode === "development"
-    ? process.env.S3_TEST_BUCKET_NAME
+    ? process.env.S3_BUCKET_NAME_TEST
     : process.env.S3_BUCKET_NAME;
 };
 
 // -------------------- Bull Board (dev only) --------------------
-if (executionMode === "development") {
+if (executionMode === "development" || executionMode === "test") {
   const serverAdapter = new ExpressAdapter();
   serverAdapter.setBasePath("/admin/queues");
   app.use("/admin/queues", serverAdapter.getRouter());
@@ -70,7 +70,7 @@ const mainProcess = async () => {
     const s3BucketName = getS3BucketName(executionMode);
 
     if (!s3BucketName) {
-      logErrorToFile("Environment variable S3_BUCKET_NAME (or S3_TEST_BUCKET_NAME) is not set.");
+      logErrorToFile("Environment variable S3_BUCKET_NAME (or S3_BUCKET_NAME_TEST) is not set.");
       return;
     }
 
@@ -143,7 +143,7 @@ app.post("/api/start-batch", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  if (executionMode === "development") {
+  if (executionMode === "development" || executionMode === "test") {
     console.log(
       "Bull Dashboard is available at http://localhost:3000/admin/queues"
     );

@@ -17,8 +17,11 @@ const app = express();
 const PORT = process.env.CSV_MAPPING_PORT || 4000;
 const MAPPINGS_PATH = path.join(__dirname, "csv-mappings.json");
 
-const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME; // reuse your existing env
-const AWS_REGION = process.env.AWS_REGION || "us-west-2";
+const executionMode = process.env.EXECUTION_MODE || "production";
+const S3_BUCKET_NAME = (executionMode === "development" || executionMode === "test")
+  ? process.env.S3_BUCKET_NAME_TEST
+  : process.env.S3_BUCKET_NAME;
+const AWS_REGION = process.env.AWS_REGION || "us-west-1";
 
 const s3Client = new S3Client({ region: AWS_REGION });
 
