@@ -192,7 +192,7 @@
         <p>Upload CSV files, configure mappings, and sync products with WooCommerce</p>
       </div>
       <div class="page-header-right">
-        <a href="/admin/queues" target="_blank" class="btn btn-secondary">📊 Bull Dashboard</a>
+        <a href="http://18.144.155.64:3000/admin/queues" target="_blank" class="btn btn-secondary">📊 Bull Dashboard</a>
         <button type="button" class="btn btn-secondary" onclick="loadAndRenderFiles()">🔄 Refresh</button>
         <button type="button" class="btn btn-success" id="start-processing-btn" onclick="triggerProcessing()">▶️ Start Processing</button>
       </div>
@@ -302,6 +302,7 @@
       REFRESH_INTERVAL: 3000, LOG_REFRESH_INTERVAL: 2000, TOAST_DURATION: 5000
     };
     let progressIntervals = {}, logInterval = null, logPaused = false;
+    let completedFiles = new Set();  // Track files that have already shown completion toast
     function escapeHtml(text) { if (!text) return ''; const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
     function formatDate(dateString) { if (!dateString) return 'Unknown'; const date = new Date(dateString); return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}); }
     function setLoading(element, isLoading) { if (isLoading) { element.classList.add('loading'); element.disabled = true; } else { element.classList.remove('loading'); element.disabled = false; } }
@@ -342,6 +343,7 @@
     async function flushRedis() {
       showModal('🗑️ Flush Redis', `<strong>Warning:</strong> This will clear all Redis data including:<br><br>• All checkpoint data<br>• BullMQ job queues<br>• Product ID caches<br><br>Processing will restart from the beginning for all files.`,
         async () => {
+          completedFiles.clear();  // Reset completion tracking
           const btn = document.getElementById('btn-flush'); setLoading(btn, true); setAdminStatus('Flushing Redis...');
           try { showToast('Flushing Redis databases...', 'info'); const result = await apiRequest(`${CONFIG.API.ADMIN}/flush-redis`, { method: 'POST' }); showToast(result.message || 'Redis flushed successfully', 'success'); setAdminStatus('Redis flushed at ' + new Date().toLocaleTimeString()); setTimeout(() => { fetchSystemStatus(); loadAndRenderFiles(); }, 1000); }
           catch (error) { showToast('Failed to flush Redis: ' + error.message, 'error'); setAdminStatus('Flush failed'); }
@@ -351,6 +353,7 @@
     async function fullSystemReset() {
       showModal('⚠️ Full System Reset', `<strong style="color: var(--color-danger);">DANGER:</strong> This will perform a complete system reset:<br><br><strong>Actions:</strong><br>• Stop all PM2 workers<br>• Flush ALL Redis data<br>• Delete checkpoint files<br>• Clear batch status<br>• Remove missing products files<br>• Restart all workers<br><br><strong>This cannot be undone!</strong>`,
         async () => {
+          completedFiles.clear();  // Reset completion tracking
           const btn = document.getElementById('btn-reset'); setLoading(btn, true); setAdminStatus('Performing full reset...');
           try { showToast('Performing full system reset... This may take 10-15 seconds.', 'warning'); const result = await apiRequest(`${CONFIG.API.ADMIN}/full-reset`, { method: 'POST' }); showToast(result.message || 'Full reset completed', 'success'); setAdminStatus('Full reset completed at ' + new Date().toLocaleTimeString()); setTimeout(async () => { await fetchSystemStatus(); await loadAndRenderFiles(); fetchLogs(); }, 5000); }
           catch (error) { showToast('Reset failed: ' + error.message, 'error'); setAdminStatus('Reset failed - check logs'); }
@@ -426,6 +429,9 @@
     async function renderFileCard(file) {
       const progress = await fetchProgress(file.fileKey);
       const isCompleted = progress && progress.status === 'completed';
+      if (isCompleted) {
+        completedFiles.add(file.fileKey);  // Mark as already completed
+      }
       const hasMissing = progress && progress.missingProductsCount > 0;
       return `<div class="file-card" data-filekey="${escapeHtml(file.fileKey)}"><div class="file-card-header"><div class="file-card-title">${escapeHtml(file.fileKey)}</div><div class="file-card-meta">${getStatusBadge(file, progress)}<span>${formatDate(file.uploadedAt)}</span></div></div><div class="file-card-body">${renderProgressBar(progress)}${renderStats(progress)}${renderMissingAlert(progress)}</div><div class="file-card-footer"><button class="btn btn-sm btn-secondary" onclick="loadMappingEditor('${escapeHtml(file.fileKey)}')">⚙️ Configure</button>${isCompleted && hasMissing ? `<button class="btn btn-sm btn-success" onclick="createMissingProducts('${escapeHtml(file.fileKey)}')">➕ Create Products</button>` : ''}<button class="btn btn-sm btn-purple" onclick="reprocessFile('${escapeHtml(file.fileKey)}')">🔄 Reprocess</button><button class="btn btn-sm btn-danger" onclick="deleteFile('${escapeHtml(file.fileKey)}')">🗑️</button></div></div>`;
     }
@@ -435,13 +441,33 @@
       if (files.length === 0) { container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📭</div><div class="empty-state-title">No files registered</div><p>Upload a CSV file to get started</p></div>`; return; }
       const cards = await Promise.all(files.map(file => renderFileCard(file)));
       container.innerHTML = `<div class="files-grid">${cards.join('')}</div>`;
-      files.forEach(file => { if (file.status === 'ready' || file.status === 'processing') { startProgressPolling(file.fileKey); } });
+      files.forEach(file => { 
+        if ((file.status === 'ready' || file.status === 'processing') && !completedFiles.has(file.fileKey)) { 
+          startProgressPolling(file.fileKey); 
+        } 
+      });
     }
     function startProgressPolling(fileKey) {
-      if (progressIntervals[fileKey]) return;
+      // Don't start if already polling OR already completed
+      if (progressIntervals[fileKey] || completedFiles.has(fileKey)) return;
+      
       progressIntervals[fileKey] = setInterval(async () => {
         const progress = await fetchProgress(fileKey);
-        if (progress) { updateFileCardProgress(fileKey, progress); if (progress.status === 'completed') { stopProgressPolling(fileKey); showToast(`File ${fileKey} processing completed!`, 'success'); await loadAndRenderFiles(); } }
+        if (progress) { 
+          updateFileCardProgress(fileKey, progress); 
+          
+          if (progress.status === 'completed') { 
+            stopProgressPolling(fileKey);
+            
+            // Only show toast if we haven't shown it before for this file
+            if (!completedFiles.has(fileKey)) {
+              completedFiles.add(fileKey);
+              showToast(`File ${fileKey} processing completed!`, 'success'); 
+            }
+            
+            await loadAndRenderFiles();
+          } 
+        }
       }, CONFIG.REFRESH_INTERVAL);
     }
     function stopProgressPolling(fileKey) { if (progressIntervals[fileKey]) { clearInterval(progressIntervals[fileKey]); delete progressIntervals[fileKey]; } }
@@ -459,6 +485,7 @@
     async function reprocessFile(fileKey) {
       showModal('🔄 Reprocess File', `This will reset all progress for <strong>${escapeHtml(fileKey)}</strong> and start processing from scratch.<br><br>This action will:<br>• Clear Redis checkpoint data<br>• Delete batch status files<br>• Remove missing products files<br>• Restart processing workers`,
         async () => {
+          completedFiles.delete(fileKey);  // Allow this file to show completion toast again
           try { showToast('Reprocessing file... This may take a moment.', 'info'); await apiRequest(`${CONFIG.API.MAPPINGS}/${encodeURIComponent(fileKey)}/reprocess`, { method: 'POST' }); showToast('File queued for reprocessing. Check logs for progress.', 'success'); setTimeout(async () => { await loadAndRenderFiles(); fetchLogs(); fetchSystemStatus(); }, 2000); }
           catch (error) { showToast(error.message, 'error'); }
         }, 'Reprocess', 'btn-purple');

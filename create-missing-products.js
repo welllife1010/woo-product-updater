@@ -49,55 +49,350 @@ function getCleanFileKey(fileKey) {
 }
 
 /**
- * Field name aliases to normalize CSV column names to ACF field names
+ * FIELD_ALIASES - Maps CSV column names to ACF field names
+ * 
+ * Keys are lowercase with spaces converted to underscores.
+ * Values are the canonical ACF field names.
  */
 const FIELD_ALIASES = {
-  // Part number variants
+  // ========== PART NUMBER VARIANTS ==========
   "manufacturer_part_number": "part_number",
   "mfr_part_number": "part_number",
+  "mpn": "part_number",
+  "partnumber": "part_number",
+  "part_no": "part_number",
+  "part#": "part_number",
+  "part_#": "part_number",
+  "pn": "part_number",
+  "sku": "part_number",  // Some vendors use SKU as part number
   
-  // Description variants
+  // ========== MANUFACTURER VARIANTS ==========
+  "mfr": "manufacturer",
+  "mfg": "manufacturer",
+  "brand": "manufacturer",
+  "vendor": "manufacturer",
+  "supplier": "manufacturer",
+  "make": "manufacturer",
+  
+  // ========== CATEGORY VARIANTS ==========
+  "cat": "category",
+  "product_category": "category",
+  "categorypath": "category",
+  "category_path": "category",
+  "categories": "category",
+  "prod_category": "category",
+  
+  // ========== DESCRIPTION VARIANTS ==========
   "product_description": "part_description",
+  "description": "part_description",
+  "desc": "part_description",
+  "part_desc": "part_description",
   "short_product_description": "short_description",
+  "brief_description": "short_description",
+  "summary": "short_description",
   "detailed_product_description": "detail_description",
+  "long_description": "detail_description",
+  "full_description": "detail_description",
+  "extended_description": "detail_description",
   
-  // Quantity variants
+  // ========== QUANTITY VARIANTS ==========
   "stock_quantity": "quantity",
   "quantity_available": "quantity",
+  "qty": "quantity",
+  "stock": "quantity",
+  "available_qty": "quantity",
+  "avail_qty": "quantity",
+  "inventory": "quantity",
+  "in_stock": "quantity",
+  "qty_available": "quantity",
   
-  // Compliance fields
+  // ========== COMPLIANCE FIELDS ==========
+  // RoHS variants
   "rohs_compliance": "rohs_status",
+  "rohs": "rohs_status",
+  "rohscompliant": "rohs_status",
+  "rohs_compliant": "rohs_status",
+  "rohsstatus": "rohs_status",
+  "rohs_certified": "rohs_status",
+  
+  // REACH variants
   "reach_compliance": "reach_status",
+  "reach": "reach_status",
+  "reachstatus": "reach_status",
+  "reach_compliant": "reach_status",
+  "reachcompliant": "reach_status",
+  
+  // ========== EXPORT/CUSTOMS FIELDS ==========
+  // HTS/HTSUS variants
   "hts_code": "htsus_code",
+  "hts": "htsus_code",
+  "htsuscode": "htsus_code",
+  "tariff_code": "htsus_code",
+  "harmonized_code": "htsus_code",
+  "hs_code": "htsus_code",
+  "customs_code": "htsus_code",
+  
+  // ECCN variants
   "eccn": "export_control_class_number",
+  "eccn_code": "export_control_class_number",
+  "exportcontrolclassnumber": "export_control_class_number",
+  "export_class": "export_control_class_number",
+  "export_control": "export_control_class_number",
   
-  // URL fields
+  // ========== URL FIELDS (including wildcard variants) ==========
+  // Datasheet variants
   "datasheet_url": "datasheet",
+  "datasheet_url*": "datasheet",
+  "datasheeturl": "datasheet",
+  "datasheeturl*": "datasheet",
+  "pdf_url": "datasheet",
+  "spec_sheet": "datasheet",
+  "specsheet": "datasheet",
+  "spec_url": "datasheet",
+  "documentation_url": "datasheet",
+  "doc_url": "datasheet",
+  
+  // Image variants
   "image_attachment_url": "image_url",
+  "imageurl": "image_url",
+  "product_image": "image_url",
+  "image": "image_url",
+  "photo_url": "image_url",
+  "picture_url": "image_url",
+  "img_url": "image_url",
+  "thumbnail": "image_url",
+  "product_image_url": "image_url",
   
-  // Other spec fields
+  // ========== PHYSICAL SPECS ==========
+  // Dimensions variants
   "size_/_dimension": "dimensions",
-  "voltage_-_input_(max)": "voltage",
-  "capacitance_@_frequency": "capacitance",
+  "size_/_dimensions": "dimensions",
+  "size": "dimensions",
+  "package_size": "dimensions",
+  "dim": "dimensions",
+  "dimension": "dimensions",
+  "physical_dimensions": "dimensions",
+  "case_size": "dimensions",
   
-  // Manufacturer variants
-  "mfr": "manufacturer",
-  "cat": "category",
+  // Voltage variants
+  "voltage_-_input_(max)": "voltage",
+  "voltage_-_input": "voltage",
+  "voltage_max": "voltage",
+  "operating_voltage": "voltage",
+  "supply_voltage": "voltage",
+  "voltage___supply": "voltage",
+  "input_voltage": "voltage",
+  "vcc": "voltage",
+  "v_supply": "voltage",
+  
+  // Capacitance variants
+  "capacitance_@_frequency": "capacitance",
+  "capacitance": "capacitance",
+  "cap_value": "capacitance",
+  "cap": "capacitance",
+  
+  // Temperature variants
+  "operating_temperature": "operating_temperature",
+  "temp_range": "operating_temperature",
+  "temperature": "operating_temperature",
+  "temp": "operating_temperature",
+  "operating_temp": "operating_temperature",
+  "op_temp": "operating_temperature",
+  "temperature_range": "operating_temperature",
+  
+  // MSL variants
+  "moisture_sensitivity_level": "moisture_sensitivity_level",
+  "msl": "moisture_sensitivity_level",
+  "moisturesensitivitylevel": "moisture_sensitivity_level",
+  "moisture_level": "moisture_sensitivity_level",
+  
+  // Mounting variants
+  "mounting_type": "mounting_type",
+  "mount_type": "mounting_type",
+  "mount": "mounting_type",
+  "mounting": "mounting_type",
+  "mounting_style": "mounting_type",
+  
+  // Package variants
+  "package": "packaging",
+  "package_type": "packaging",
+  "packaging": "packaging",
+  "pkg": "packaging",
+  "case_package": "packaging",
+  "package___case": "packaging",
+  
+  // Termination variants
+  "termination_style": "termination_style",
+  "termination": "termination_style",
+  "lead_style": "termination_style",
+  "lead_type": "termination_style",
+  "terminal_type": "termination_style",
+  
+  // ========== OTHER FIELDS ==========
+  // Series variants
+  "series": "series",
+  "product_series": "series",
+  "product_line": "series",
+  "family": "series",
+  
+  // Title variants
+  "part_title": "part_title",
+  "product_name": "part_title",
+  "title": "part_title",
+  "name": "part_title",
+  "product_title": "part_title",
+  
+  // Lead time variants
+  "leadtime": "manufacturer_lead_weeks",
+  "lead_time": "manufacturer_lead_weeks",
+  "lead_weeks": "manufacturer_lead_weeks",
+  
+  // SPQ variants
+  "spq": "spq",
+  "standard_package_qty": "spq",
+  "standard_pack_qty": "spq",
+  "min_qty": "spq",
+  
+  // Supplier device package
+  "supplier_device_package": "supplier_device_package",
+  "supplier_package": "supplier_device_package",
 };
 
 /**
  * normalizeProductData(productData)
- * Normalize field names from CSV format to ACF format
+ * 
+ * Normalizes field names from CSV format to ACF format.
+ * 
+ * Steps:
+ * 1. Remove asterisks from column names (e.g., "Datasheet URL*" → "Datasheet URL")
+ * 2. Convert to lowercase
+ * 3. Replace spaces with underscores
+ * 4. Apply field aliases to get canonical ACF names
+ * 
+ * @param {Object} productData - Raw CSV row object
+ * @returns {Object} - Normalized object with ACF field names
  */
 function normalizeProductData(productData) {
   const normalized = {};
+  
   for (const [key, value] of Object.entries(productData)) {
-    // Remove asterisks, trim, lowercase, replace spaces with underscores
-    const cleanKey = key.replace(/\*/g, "").trim().toLowerCase().replace(/\s+/g, "_");
-    const aliasKey = FIELD_ALIASES[cleanKey] || cleanKey;
-    normalized[aliasKey] = value;
+    // Skip null/undefined keys
+    if (!key) continue;
+    
+    // Clean the key:
+    // 1. Remove asterisks (wildcards in CSV headers)
+    // 2. Trim whitespace
+    // 3. Convert to lowercase
+    // 4. Replace spaces and special chars with underscores
+    let cleanKey = key
+      .replace(/\*/g, "")        // Remove asterisks
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")      // Spaces to underscores
+      .replace(/[()]/g, "")      // Remove parentheses
+      .replace(/-/g, "_")        // Dashes to underscores
+      .replace(/__+/g, "_");     // Multiple underscores to single
+    
+    // Apply alias to get canonical ACF field name
+    const acfKey = FIELD_ALIASES[cleanKey] || cleanKey;
+    
+    // Clean the value
+    let cleanValue = value;
+    if (typeof cleanValue === "string") {
+      cleanValue = cleanValue.trim();
+      // Skip empty, null-like values
+      if (cleanValue === "" || cleanValue === "N/A" || cleanValue === "-" || cleanValue === "—") {
+        cleanValue = "";
+      }
+    }
+    
+    normalized[acfKey] = cleanValue;
   }
+  
   return normalized;
+}
+
+/**
+ * buildMetaData(data)
+ * 
+ * Builds the meta_data array for WooCommerce from normalized data.
+ * Only includes fields that have non-empty values.
+ * 
+ * @param {Object} data - Normalized product data
+ * @param {string} partNumber - Part number (already extracted)
+ * @param {string} manufacturer - Manufacturer (already resolved)
+ * @param {string} additionalInfo - Additional key information HTML
+ * @returns {Array} - WooCommerce meta_data array
+ */
+function buildMetaData(data, partNumber, manufacturer, additionalInfo) {
+  const metaFields = [
+    { key: "part_number", value: partNumber },
+    { key: "manufacturer", value: manufacturer },
+    { key: "series", value: data.series || "" },
+    { key: "quantity", value: data.quantity || "0" },
+    { key: "short_description", value: data.short_description || data.part_description || "" },
+    { key: "detail_description", value: data.detail_description || data.part_description || "" },
+    { key: "reach_status", value: data.reach_status || "" },
+    { key: "rohs_status", value: data.rohs_status || "" },
+    { key: "moisture_sensitivity_level", value: data.moisture_sensitivity_level || "" },
+    { key: "export_control_class_number", value: data.export_control_class_number || "" },
+    { key: "htsus_code", value: data.htsus_code || "" },
+    { key: "datasheet", value: data.datasheet || "" },
+    { key: "datasheet_url", value: data.datasheet || "" },
+    { key: "image_url", value: data.image_url || "" },
+    { key: "operating_temperature", value: data.operating_temperature || "" },
+    { key: "voltage", value: data.voltage || "" },
+    { key: "dimensions", value: data.dimensions || "" },
+    { key: "mounting_type", value: data.mounting_type || data.termination_style || "" },
+    { key: "packaging", value: data.packaging || "" },
+    { key: "capacitance", value: data.capacitance || "" },
+    { key: "spq", value: data.spq || "" },
+    { key: "manufacturer_lead_weeks", value: data.manufacturer_lead_weeks || "" },
+    { key: "supplier_device_package", value: data.supplier_device_package || "" },
+    { key: "additional_key_information", value: additionalInfo || "" },
+  ]; 
+  // Filter out empty values (optional - keeps payload smaller)
+  // But keep manufacturer and part_number even if empty
+  return metaFields.filter(field => 
+    field.value !== "" || 
+    field.key === "part_number" || 
+    field.key === "manufacturer"
+  );
+}
+
+/**
+ * DEBUG: Log field mapping for troubleshooting
+ * 
+ * Call this to see how CSV columns are being mapped:
+ * 
+ * debugFieldMapping(rawProductData);
+ */
+function debugFieldMapping(productData) {
+  console.log("\n========== FIELD MAPPING DEBUG ==========");
+  console.log("Raw CSV columns → ACF fields:");
+  console.log("----------------------------------------");
+  
+  for (const [key, value] of Object.entries(productData)) {
+    let cleanKey = key
+      .replace(/\*/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/[()]/g, "")
+      .replace(/-/g, "_")
+      .replace(/__+/g, "_");
+    
+    const acfKey = FIELD_ALIASES[cleanKey] || cleanKey;
+    const mapped = FIELD_ALIASES[cleanKey] ? "✅" : "⚠️ ";
+    
+    console.log(`${mapped} "${key}" → "${cleanKey}" → "${acfKey}"`);
+    if (value) {
+      const preview = String(value).substring(0, 50);
+      console.log(`   Value: ${preview}${value.length > 50 ? "..." : ""}`);
+    }
+  }
+  
+  console.log("==========================================\n");
 }
 
 /**
@@ -244,7 +539,13 @@ const processMissingProducts = async (categorySlug, fileKey) => {
         ];
         const additionalInfo = buildAdditionalKeyInfo(data, excludeKeys);
 
-        // 3d) Build the WooCommerce "create product" payload
+        // DEBUG: See exactly how fields are being mapped
+        console.log("=== RAW productData ===");
+        console.log(Object.keys(productData).slice(0, 10));
+        console.log("=== NORMALIZED data ===");  
+        console.log(JSON.stringify(data, null, 2).substring(0, 500));
+
+       // 3d) Build the WooCommerce "create product" payload
         const newProduct = {
           name: data.part_title || data.part_number || partNumber,
           sku: data.sku || data.part_number || partNumber,
@@ -252,27 +553,8 @@ const processMissingProducts = async (categorySlug, fileKey) => {
           short_description: data.short_description || data.part_description || "",
           categories: categoryIds.map((id) => ({ id })),
           
-          meta_data: [
-            { key: "part_number", value: partNumber },
-            { key: "manufacturer", value: canonicalManufacturer },
-            { key: "series", value: data.series || "" },
-            { key: "quantity", value: data.quantity || "0" },
-            { key: "short_description", value: data.short_description || data.part_description || "" },
-            { key: "detail_description", value: data.detail_description || data.part_description || "" },
-            { key: "reach_status", value: data.reach_status || "" },
-            { key: "rohs_status", value: data.rohs_status || "" },
-            { key: "moisture_sensitivity_level", value: data.moisture_sensitivity_level || "" },
-            { key: "export_control_class_number", value: data.export_control_class_number || "" },
-            { key: "htsus_code", value: data.htsus_code || "" },
-            { key: "datasheet", value: data.datasheet || "" },
-            { key: "datasheet_url", value: data.datasheet || "" },
-            { key: "image_url", value: data.image_url || "" },
-            { key: "operating_temperature", value: data.operating_temperature || "" },
-            { key: "voltage", value: data.voltage || "" },
-            { key: "dimensions", value: data.dimensions || "" },
-            { key: "mounting_type", value: data.mounting_type || data.termination_style || "" },
-            { key: "additional_key_information", value: additionalInfo },
-          ],
+          // USE the buildMetaData() function instead of manual construction!
+          meta_data: buildMetaData(data, partNumber, canonicalManufacturer, additionalInfo),
         };
 
         // Add category path meta for debugging
@@ -315,7 +597,13 @@ const processMissingProducts = async (categorySlug, fileKey) => {
   }
 };
 
-module.exports = { processMissingProducts };
+module.exports = {
+  FIELD_ALIASES,
+  normalizeProductData,
+  buildMetaData,
+  debugFieldMapping,
+  processMissingProducts
+};
 
 /**
  * CLI entry point
