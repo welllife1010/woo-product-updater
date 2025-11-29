@@ -24,12 +24,6 @@
  *
  * Example:
  *   node create-missing-products.js microcontrollers product-microcontrollers-03112025_part4.csv
- *
- *   - categorySlug:
- *       The LEAF category slug (e.g. "microcontrollers") used in the folder name.
- *   - fileKey:
- *       The original CSV filename (or S3 key) used in the batch, e.g.:
- *         "product-microcontrollers-03112025_part4.csv"
  */
 
 const fs = require("fs");
@@ -38,65 +32,77 @@ const path = require("path");
 const { wooApi } = require("./woo-helpers");
 const { logInfoToFile, logErrorToFile } = require("./logger");
 
-// Smart category resolver:
-// - First tries fuzzy match against EXISTING Woo categories.
-// - If nothing found, falls back to CSV + fuzzy via category-map.js.
+// Smart category resolver
 const { resolveCategorySmart } = require("./category-resolver");
-
 const { resolveManufacturerSmart } = require("./manufacturer-resolver");
-
-// Shared category creation helpers (canonical implementation):
-// - ensureCategoryHierarchyIds({ main, sub, sub2 }) → [id1, id2, id3?]
 const { ensureCategoryHierarchyIds } = require("./category-woo");
 
-// Optional: execution mode (can be used later to skip "create" calls in tests)
+// Execution mode
 const EXECUTION_MODE = process.env.EXECUTION_MODE || "production";
 
 /**
  * getCleanFileKey(fileKey)
- *
- * GOAL:
- *   Normalize any kind of "file key" (local filename or S3 key) into a simple
- *   base name without extension. This is used to build a predictable JSON
- *   filename for the missing products file.
- *
- * EXAMPLES:
- *   - "product-microcontrollers-03112025_part4.csv"
- *       → "product-microcontrollers-03112025_part4"
- *
- *   - "vendor-x/ics/microcontrollers-part2.csv"
- *       → "microcontrollers-part2"
- *
- *   - "LED-Emitters-IR-UV-Visible.csv"
- *       → "LED-Emitters-IR-UV-Visible"
- *
- * HOW:
- *   - path.basename() removes folder prefixes.
- *   - regex replaces the final ".something" with "".
+ * Normalize file key: remove .csv extension and replace slashes with underscores
  */
 function getCleanFileKey(fileKey) {
-  const base = path.basename(fileKey);  // "folder/file.csv" → "file.csv"
-  return base.replace(/\.[^.]+$/, "");  // remove last extension (".csv")
+  return fileKey.replace(/\.csv$/i, "").replace(/\//g, "_");
+}
+
+/**
+ * Field name aliases to normalize CSV column names to ACF field names
+ */
+const FIELD_ALIASES = {
+  // Part number variants
+  "manufacturer_part_number": "part_number",
+  "mfr_part_number": "part_number",
+  
+  // Description variants
+  "product_description": "part_description",
+  "short_product_description": "short_description",
+  "detailed_product_description": "detail_description",
+  
+  // Quantity variants
+  "stock_quantity": "quantity",
+  "quantity_available": "quantity",
+  
+  // Compliance fields
+  "rohs_compliance": "rohs_status",
+  "reach_compliance": "reach_status",
+  "hts_code": "htsus_code",
+  "eccn": "export_control_class_number",
+  
+  // URL fields
+  "datasheet_url": "datasheet",
+  "image_attachment_url": "image_url",
+  
+  // Other spec fields
+  "size_/_dimension": "dimensions",
+  "voltage_-_input_(max)": "voltage",
+  "capacitance_@_frequency": "capacitance",
+  
+  // Manufacturer variants
+  "mfr": "manufacturer",
+  "cat": "category",
+};
+
+/**
+ * normalizeProductData(productData)
+ * Normalize field names from CSV format to ACF format
+ */
+function normalizeProductData(productData) {
+  const normalized = {};
+  for (const [key, value] of Object.entries(productData)) {
+    // Remove asterisks, trim, lowercase, replace spaces with underscores
+    const cleanKey = key.replace(/\*/g, "").trim().toLowerCase().replace(/\s+/g, "_");
+    const aliasKey = FIELD_ALIASES[cleanKey] || cleanKey;
+    normalized[aliasKey] = value;
+  }
+  return normalized;
 }
 
 /**
  * parseCategoryPath(rawCategory)
- *
- * PURPOSE:
- *   Fallback parser when fuzzy resolution fails.
- *   Takes a raw category string like:
- *     "Integrated Circuits (ICs)>Embedded>Microcontrollers"
- *
- *   and turns it into:
- *     {
- *       main: "Integrated Circuits (ICs)",
- *       sub:  "Embedded",
- *       sub2: "Microcontrollers",
- *       score: 1,
- *       matchedOn: "sub2"   // we treat this as "full path provided"
- *     }
- *
- *   If there are fewer than 3 parts, the missing ones become null.
+ * Fallback parser for "A>B>C" category strings
  */
 function parseCategoryPath(rawCategory) {
   if (!rawCategory) return null;
@@ -113,84 +119,54 @@ function parseCategoryPath(rawCategory) {
     sub: parts[1] || null,
     sub2: parts[2] || null,
     score: 1,
-    matchedOn:
-      parts.length === 1 ? "main" : parts.length === 2 ? "sub" : "sub2",
+    matchedOn: parts.length === 1 ? "main" : parts.length === 2 ? "sub" : "sub2",
   };
 }
 
 /**
  * buildCategoryPath(resolvedCategory)
- *
- * PURPOSE:
- *   Build a human-readable string from a resolved category object.
- *
- * EXAMPLE:
- *   input: { main: "ICs", sub: "Embedded", sub2: "MCUs" }
- *   output: "ICs > Embedded > MCUs"
- *
- * Used primarily for logging and debugging.
+ * Build a human-readable string from a resolved category object
  */
 function buildCategoryPath(resolvedCategory) {
   if (!resolvedCategory) return "";
-
   const parts = [
     resolvedCategory.main,
     resolvedCategory.sub,
     resolvedCategory.sub2,
   ].filter(Boolean);
-
   return parts.join(" > ");
 }
 
 /**
+ * buildAdditionalKeyInfo(data, excludeKeys)
+ * Build additional_key_information from unmapped fields
+ */
+function buildAdditionalKeyInfo(data, excludeKeys) {
+  const lines = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (excludeKeys.includes(key) || !value) continue;
+    // Format key nicely: replace underscores with spaces, capitalize
+    const label = key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+    lines.push(`<strong>${label}:</strong> ${value}`);
+  }
+  return lines.join("<br/>");
+}
+
+/**
  * processMissingProducts(categorySlug, fileKey)
- *
- * MAIN ENTRY FUNCTION (for other modules and CLI).
- *
- * RESPONSIBILITIES:
- *   1) Build the path to the missing-products JSON file using categorySlug + fileKey.
- *   2) Load and parse the JSON file.
- *   3) For each missing product:
- *        a. Determine the best category hierarchy:
- *           - Use resolveCategorySmart() (Woo fuzzy → CSV fuzzy).
- *           - Fallback to simple "A>B>C" parsing if needed.
- *        b. Ensure that hierarchy exists in WooCommerce:
- *           - Calls ensureCategoryHierarchyIds() to get a list of IDs.
- *        c. Build a WooCommerce "create product" payload.
- *        d. POST to WooCommerce REST API to actually create the product.
- *   4) Log results for success and error cases.
- *
- * PARAMETERS:
- *   @param {string} categorySlug
- *     - The leaf category slug used to store missing-product files by folder.
- *     - Example: "microcontrollers", "led-emitters-ir-uv-visible", "resistors".
- *
- *   @param {string} fileKey
- *     - The original CSV filename or key used in the batch run.
- *     - Example: "product-microcontrollers-03112025_part4.csv"
- *                "LED-Emitters-IR-UV-Visible.csv"
- *
- * RETURNS:
- *   @returns {Promise<void>}
- *     - Resolves when all rows have been processed (or skipped).
- *     - Errors are logged via logErrorToFile; this function itself
- *       does not throw in normal flow.
+ * Main entry function for processing missing products
  */
 const processMissingProducts = async (categorySlug, fileKey) => {
   try {
-    // -------------------------------------------------------------------------
-    // 1) Locate the JSON file for this categorySlug + fileKey
-    // -------------------------------------------------------------------------
+    // 1) Locate the JSON file
     const cleanFileKey = getCleanFileKey(fileKey);
-
     const missingFilePath = path.join(
       __dirname,
       "missing-products",
-      `missing-${categorySlug}`,              // e.g. "missing-microcontrollers"
-      `missing_products_${cleanFileKey}.json` // e.g. "missing_products_product-microcontrollers-03112025_part4.json"
+      `missing-${categorySlug}`,
+      `missing_products_${cleanFileKey}.json`
     );
 
-    // If there is no JSON file, there is simply nothing to do.
     if (!fs.existsSync(missingFilePath)) {
       logInfoToFile(
         `[create-missing-products] No missing products file found for ${fileKey}, skipping.`
@@ -198,9 +174,7 @@ const processMissingProducts = async (categorySlug, fileKey) => {
       return;
     }
 
-    // -------------------------------------------------------------------------
     // 2) Load and parse the JSON file
-    // -------------------------------------------------------------------------
     let missingProducts = [];
     try {
       const rawJson = fs.readFileSync(missingFilePath, "utf8");
@@ -216,30 +190,22 @@ const processMissingProducts = async (categorySlug, fileKey) => {
       `[create-missing-products] 🚀 Processing ${missingProducts.length} missing products from ${missingFilePath}`
     );
 
-    // -------------------------------------------------------------------------
     // 3) Loop through each missing product row
-    // -------------------------------------------------------------------------
     for (const productData of missingProducts) {
       try {
-        const partNumber = productData.part_number || "";
-        const rawManufacturer =
-          productData.manufacturer || productData.Manufacturer || "";
+        // Normalize field names from CSV to ACF format
+        const data = normalizeProductData(productData);
+        
+        const partNumber = data.part_number || "";
+        const rawManufacturer = data.manufacturer || "";
         const manufacturerResolved = resolveManufacturerSmart(rawManufacturer);
-        const canonicalManufacturer =
-          manufacturerResolved?.canonical || rawManufacturer || "";
-        const rawCategory =
-          productData.category || productData.Category || ""; // allow both cases
+        const canonicalManufacturer = manufacturerResolved?.canonical || rawManufacturer || "";
+        const rawCategory = data.category || "";
 
-        // ---------------------------------------------------------------
-        // 3a) Resolve category hierarchy (smart fuzzy + fallback)
-        // ---------------------------------------------------------------
+        // 3a) Resolve category hierarchy
         let resolvedCategory = null;
-
         if (rawCategory) {
           try {
-            // Smart category resolution:
-            //   1) fuzzy match against existing Woo categories (website as truth)
-            //   2) if not found, fuzzy against category-hierarchy-ref.csv
             resolvedCategory = await resolveCategorySmart(rawCategory);
           } catch (err) {
             logErrorToFile(
@@ -247,8 +213,6 @@ const processMissingProducts = async (categorySlug, fileKey) => {
             );
           }
 
-          // Fallback: if the smart resolver couldn't find anything,
-          // try interpreting the raw string as a "A>B>C" path.
           if (!resolvedCategory) {
             resolvedCategory = parseCategoryPath(rawCategory);
           }
@@ -256,145 +220,95 @@ const processMissingProducts = async (categorySlug, fileKey) => {
           if (resolvedCategory) {
             const pathStr = buildCategoryPath(resolvedCategory);
             logInfoToFile(
-              `[create-missing-products] Category for part_number=${partNumber}: ` +
-                `"${rawCategory}" → "${pathStr}" ` +
-                `(matchedOn=${resolvedCategory.matchedOn || "n/a"})`
+              `[create-missing-products] Category for part_number=${partNumber}: "${rawCategory}" → "${pathStr}"`
             );
           } else {
             logInfoToFile(
-              `[create-missing-products] No category could be resolved for part_number=${partNumber}, rawCategory="${rawCategory}"`
+              `[create-missing-products] No category resolved for part_number=${partNumber}, rawCategory="${rawCategory}"`
             );
           }
-        } else {
-          logInfoToFile(
-            `[create-missing-products] No category field present for part_number=${partNumber}`
-          );
         }
 
-        // ---------------------------------------------------------------
-        // 3b) Ensure those categories exist in WooCommerce
-        // ---------------------------------------------------------------
+        // 3b) Ensure categories exist in WooCommerce
         let categoryIds = [];
         if (resolvedCategory) {
-          // This calls into the shared category-woo.js helper.
-          // It will:
-          //   - find or create main/sub/sub2
-          //   - return an array of IDs in hierarchical order.
           categoryIds = await ensureCategoryHierarchyIds(resolvedCategory);
         }
 
-        // ---------------------------------------------------------------
-        // 3c) Build the WooCommerce "create product" payload
-        // ---------------------------------------------------------------
+        // 3c) Build additional_key_information from unmapped fields
+        const excludeKeys = [
+          "part_number", "manufacturer", "category", "short_description",
+          "part_description", "detail_description", "datasheet", "image_url",
+          "rohs_status", "reach_status", "htsus_code", "export_control_class_number",
+          "moisture_sensitivity_level", "quantity", "series"
+        ];
+        const additionalInfo = buildAdditionalKeyInfo(data, excludeKeys);
+
+        // 3d) Build the WooCommerce "create product" payload
         const newProduct = {
-          // Human-friendly product title:
-          //   - use part_title if available
-          //   - otherwise fall back to part_number
-          name: productData.part_title || productData.part_number,
-
-          // SKU:
-          //   - if vendor provides a dedicated 'sku', use that
-          //   - else use part_number as SKU
-          sku: productData.sku || productData.part_number,
-
-          // Long description (HTML is okay here, Woo handles it)
-          description: productData.part_description || "",
-
-          // Category assignment: list of { id }
+          name: data.part_title || data.part_number || partNumber,
+          sku: data.sku || data.part_number || partNumber,
+          description: data.detail_description || data.part_description || "",
+          short_description: data.short_description || data.part_description || "",
           categories: categoryIds.map((id) => ({ id })),
-
-          // Custom fields (stored as meta_data for ACF or other custom logic)
+          
           meta_data: [
+            { key: "part_number", value: partNumber },
             { key: "manufacturer", value: canonicalManufacturer },
-
-            // Keep existing database-style fields as ACF meta
-            { key: "series", value: productData.series || "" },
-            { key: "quantity", value: productData.quantity_available || "0" },
-            {
-              key: "short_description",
-              value: productData.short_description || "",
-            },
-            {
-              key: "detail_description",
-              value: productData.part_description || "",
-            },
-            { key: "reach_status", value: productData.reachstatus || "" },
-            { key: "rohs_status", value: productData.rohsstatus || "" },
-            {
-              key: "moisture_sensitivity_level",
-              value: productData.moisturesensitivitylevel || "",
-            },
-            {
-              key: "export_control_class_number",
-              value: productData.exportcontrolclassnumber || "",
-            },
-            { key: "htsus_code", value: productData.htsuscode || "" },
-            {
-              key: "additional_key_information",
-              value: productData.additional_info || "",
-            },
+            { key: "series", value: data.series || "" },
+            { key: "quantity", value: data.quantity || "0" },
+            { key: "short_description", value: data.short_description || data.part_description || "" },
+            { key: "detail_description", value: data.detail_description || data.part_description || "" },
+            { key: "reach_status", value: data.reach_status || "" },
+            { key: "rohs_status", value: data.rohs_status || "" },
+            { key: "moisture_sensitivity_level", value: data.moisture_sensitivity_level || "" },
+            { key: "export_control_class_number", value: data.export_control_class_number || "" },
+            { key: "htsus_code", value: data.htsus_code || "" },
+            { key: "datasheet", value: data.datasheet || "" },
+            { key: "datasheet_url", value: data.datasheet || "" },
+            { key: "image_url", value: data.image_url || "" },
+            { key: "operating_temperature", value: data.operating_temperature || "" },
+            { key: "voltage", value: data.voltage || "" },
+            { key: "dimensions", value: data.dimensions || "" },
+            { key: "mounting_type", value: data.mounting_type || data.termination_style || "" },
+            { key: "additional_key_information", value: additionalInfo },
           ],
         };
 
-        // Optional: also store the resolved category path as meta for debugging
+        // Add category path meta for debugging
         if (resolvedCategory) {
           const pathStr = buildCategoryPath(resolvedCategory);
           newProduct.meta_data.push(
-            {
-              key: "proposed_category_main",
-              value: resolvedCategory.main || "",
-            },
-            {
-              key: "proposed_category_sub",
-              value: resolvedCategory.sub || "",
-            },
-            {
-              key: "proposed_category_sub2",
-              value: resolvedCategory.sub2 || "",
-            },
-            {
-              key: "proposed_category_path",
-              value: pathStr,
-            }
+            { key: "proposed_category_main", value: resolvedCategory.main || "" },
+            { key: "proposed_category_sub", value: resolvedCategory.sub || "" },
+            { key: "proposed_category_sub2", value: resolvedCategory.sub2 || "" },
+            { key: "proposed_category_path", value: pathStr }
           );
         }
 
-        // ---------------------------------------------------------------
-        // 3d) Actually create the product in WooCommerce
-        // ---------------------------------------------------------------
+        // 3e) Actually create the product in WooCommerce
         if (EXECUTION_MODE === "test") {
-          // In test mode, we can log the payload instead of creating real products.
           logInfoToFile(
-            `[create-missing-products] (TEST MODE) Would create product part_number=${partNumber} with categories: [${categoryIds.join(
-              ", "
-            )}]`
+            `[create-missing-products] (TEST MODE) Would create product part_number=${partNumber} with categories: [${categoryIds.join(", ")}]`
           );
-          continue; // skip the actual API call
+          continue;
         }
 
         const response = await wooApi.post("products", newProduct);
 
         logInfoToFile(
-          `[create-missing-products] ✅ Created product part_number=${partNumber} (id=${
-            response.data.id
-          }) with categories: [${categoryIds.join(", ")}]`
+          `[create-missing-products] ✅ Created product part_number=${partNumber} (id=${response.data.id}) with categories: [${categoryIds.join(", ")}]`
         );
       } catch (error) {
-        // Handle errors that occur *for this single product*
         const status = error.response?.status;
-        const data = error.response?.data;
+        const errData = error.response?.data;
 
         logErrorToFile(
-          `[create-missing-products] ❌ Error creating product for part_number=${
-            productData.part_number
-          }: status=${status || "n/a"}, message=${
-            data?.message || error.message
-          }, data=${JSON.stringify(data || {}, null, 2)}`
+          `[create-missing-products] ❌ Error creating product for part_number=${productData.part_number || "unknown"}: status=${status || "n/a"}, message=${errData?.message || error.message}`
         );
       }
     }
   } catch (outerErr) {
-    // Catch any fatal errors (e.g. file-level problems)
     logErrorToFile(
       `[create-missing-products] ❌ Fatal error in processMissingProducts(${fileKey}): ${outerErr.message}`
     );
@@ -404,15 +318,11 @@ const processMissingProducts = async (categorySlug, fileKey) => {
 module.exports = { processMissingProducts };
 
 /**
- * If this file is run directly via:
- *
- *   node create-missing-products.js <categorySlug> <fileKey>
- *
- * It will call processMissingProducts() with those arguments.
+ * CLI entry point
  */
 if (require.main === module) {
-  const categorySlug = process.argv[2]; // e.g. "microcontrollers"
-  const fileKey = process.argv[3];      // e.g. "product-microcontrollers-03112025_part4.csv"
+  const categorySlug = process.argv[2];
+  const fileKey = process.argv[3];
 
   if (!categorySlug || !fileKey) {
     console.error(

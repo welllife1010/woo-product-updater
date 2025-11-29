@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Woo Product Updater | Admin Dashboard</title>
+  <style>
+    :root {
+      --color-primary: #2563eb;
+      --color-primary-hover: #1d4ed8;
+      --color-primary-light: #dbeafe;
+      --color-success: #059669;
+      --color-success-light: #d1fae5;
+      --color-warning: #d97706;
+      --color-warning-light: #fef3c7;
+      --color-danger: #dc2626;
+      --color-danger-light: #fee2e2;
+      --color-purple: #7c3aed;
+      --color-purple-light: #ede9fe;
+      --color-gray-50: #f9fafb;
+      --color-gray-100: #f3f4f6;
+      --color-gray-200: #e5e7eb;
+      --color-gray-300: #d1d5db;
+      --color-gray-400: #9ca3af;
+      --color-gray-500: #6b7280;
+      --color-gray-600: #4b5563;
+      --color-gray-700: #374151;
+      --color-gray-800: #1f2937;
+      --color-gray-900: #111827;
+      --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem;
+      --space-5: 1.25rem; --space-6: 1.5rem; --space-8: 2rem; --space-10: 2.5rem;
+      --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, monospace;
+      --text-xs: 0.75rem; --text-sm: 0.875rem; --text-base: 1rem; --text-lg: 1.125rem;
+      --text-xl: 1.25rem; --text-2xl: 1.5rem; --text-3xl: 1.875rem;
+      --radius-sm: 0.25rem; --radius-md: 0.375rem; --radius-lg: 0.5rem; --radius-xl: 0.75rem;
+      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+      --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+      --transition-fast: 150ms ease; --transition-normal: 200ms ease;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    * { margin: 0; padding: 0; }
+    body { font-family: var(--font-family); font-size: var(--text-base); line-height: 1.6; color: var(--color-gray-700); background-color: var(--color-gray-50); min-height: 100vh; }
+    .container { max-width: 1400px; margin: 0 auto; padding: var(--space-6); }
+    .page-header { margin-bottom: var(--space-8); padding-bottom: var(--space-6); border-bottom: 1px solid var(--color-gray-200); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-4); }
+    .page-header-left h1 { font-size: var(--text-3xl); font-weight: 700; color: var(--color-gray-900); margin-bottom: var(--space-1); }
+    .page-header-left p { color: var(--color-gray-500); font-size: var(--text-sm); }
+    .page-header-right { display: flex; gap: var(--space-3); }
+    .card { background: white; border-radius: var(--radius-lg); border: 1px solid var(--color-gray-200); box-shadow: var(--shadow-sm); padding: var(--space-6); margin-bottom: var(--space-6); }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); padding-bottom: var(--space-4); border-bottom: 1px solid var(--color-gray-100); }
+    .card-header h2 { font-size: var(--text-xl); font-weight: 600; color: var(--color-gray-800); display: flex; align-items: center; gap: var(--space-2); }
+    .form-group { margin-bottom: var(--space-4); }
+    .form-label { display: block; font-size: var(--text-sm); font-weight: 500; color: var(--color-gray-700); margin-bottom: var(--space-2); }
+    .form-input, .form-select { display: block; width: 100%; padding: var(--space-3) var(--space-4); font-size: var(--text-base); font-family: inherit; color: var(--color-gray-700); background-color: white; border: 1px solid var(--color-gray-300); border-radius: var(--radius-md); transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
+    .form-input:focus, .form-select:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-light); }
+    .form-input[type="file"] { padding: var(--space-2); cursor: pointer; }
+    .form-input[type="file"]::file-selector-button { padding: var(--space-2) var(--space-4); margin-right: var(--space-4); background: var(--color-gray-100); border: 1px solid var(--color-gray-300); border-radius: var(--radius-sm); font-weight: 500; cursor: pointer; }
+    .form-help { font-size: var(--text-sm); color: var(--color-gray-500); margin-top: var(--space-1); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-3) var(--space-5); font-size: var(--text-sm); font-weight: 500; font-family: inherit; line-height: 1; text-decoration: none; border: 1px solid transparent; border-radius: var(--radius-md); cursor: pointer; transition: all var(--transition-fast); white-space: nowrap; }
+    .btn:focus { outline: none; box-shadow: 0 0 0 3px var(--color-primary-light); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-primary { background-color: var(--color-primary); color: white; }
+    .btn-primary:hover:not(:disabled) { background-color: var(--color-primary-hover); }
+    .btn-secondary { background-color: white; color: var(--color-gray-700); border-color: var(--color-gray-300); }
+    .btn-secondary:hover:not(:disabled) { background-color: var(--color-gray-50); border-color: var(--color-gray-400); }
+    .btn-success { background-color: var(--color-success); color: white; }
+    .btn-success:hover:not(:disabled) { background-color: #047857; }
+    .btn-danger { background-color: var(--color-danger); color: white; }
+    .btn-danger:hover:not(:disabled) { background-color: #b91c1c; }
+    .btn-warning { background-color: var(--color-warning); color: white; }
+    .btn-warning:hover:not(:disabled) { background-color: #b45309; }
+    .btn-purple { background-color: var(--color-purple); color: white; }
+    .btn-purple:hover:not(:disabled) { background-color: #6d28d9; }
+    .btn-sm { padding: var(--space-2) var(--space-3); font-size: var(--text-xs); }
+    .btn-xs { padding: var(--space-1) var(--space-2); font-size: 10px; }
+    .btn-group { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+    
+    /* File Cards Grid */
+    .files-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: var(--space-4); }
+    .file-card { background: white; border-radius: var(--radius-lg); border: 1px solid var(--color-gray-200); box-shadow: var(--shadow-sm); overflow: hidden; transition: box-shadow var(--transition-fast); }
+    .file-card:hover { box-shadow: var(--shadow-md); }
+    .file-card-header { padding: var(--space-4); border-bottom: 1px solid var(--color-gray-100); background: var(--color-gray-50); }
+    .file-card-title { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-gray-700); word-break: break-all; margin-bottom: var(--space-2); font-weight: 500; }
+    .file-card-meta { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-xs); color: var(--color-gray-500); }
+    .file-card-body { padding: var(--space-4); }
+    .file-card-footer { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-gray-100); background: var(--color-gray-50); }
+    
+    /* Progress Bar */
+    .progress-section { margin-bottom: var(--space-4); }
+    .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2); }
+    .progress-label { font-size: var(--text-sm); font-weight: 500; color: var(--color-gray-700); }
+    .progress-value { font-size: var(--text-sm); font-weight: 600; color: var(--color-gray-900); }
+    .progress-bar-container { height: 8px; background: var(--color-gray-200); border-radius: 9999px; overflow: hidden; }
+    .progress-bar { height: 100%; border-radius: 9999px; transition: width 0.5s ease; }
+    .progress-bar-pending { background: var(--color-gray-400); }
+    .progress-bar-processing { background: linear-gradient(90deg, var(--color-primary), var(--color-purple)); animation: shimmer 2s infinite; }
+    .progress-bar-completed { background: var(--color-success); }
+    @keyframes shimmer { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    
+    /* Stats Grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); margin-bottom: var(--space-4); }
+    .stat-item { text-align: center; padding: var(--space-2); background: var(--color-gray-50); border-radius: var(--radius-sm); }
+    .stat-value { font-size: var(--text-lg); font-weight: 700; color: var(--color-gray-900); }
+    .stat-label { font-size: 10px; color: var(--color-gray-500); text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-value.success { color: var(--color-success); }
+    .stat-value.warning { color: var(--color-warning); }
+    .stat-value.danger { color: var(--color-danger); }
+    .stat-value.purple { color: var(--color-purple); }
+    
+    /* Badges */
+    .badge { display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); font-size: var(--text-xs); font-weight: 600; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.025em; }
+    .badge-pending { background-color: var(--color-warning-light); color: var(--color-warning); }
+    .badge-ready { background-color: var(--color-primary-light); color: var(--color-primary); }
+    .badge-processing { background-color: var(--color-purple-light); color: var(--color-purple); }
+    .badge-completed { background-color: var(--color-success-light); color: var(--color-success); }
+    .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background-color: currentColor; }
+    .badge-processing::before { animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    
+    /* Missing Products Alert */
+    .missing-alert { background: var(--color-purple-light); border: 1px solid var(--color-purple); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-3); display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+    .missing-alert-text { font-size: var(--text-sm); color: var(--color-purple); font-weight: 500; }
+    .missing-alert-count { font-size: var(--text-lg); font-weight: 700; color: var(--color-purple); }
+    
+    /* Toast */
+    .toast-container { position: fixed; top: var(--space-6); right: var(--space-6); z-index: 1000; display: flex; flex-direction: column; gap: var(--space-3); }
+    .toast { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-4); background: white; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); border-left: 4px solid var(--color-gray-400); max-width: 400px; animation: slideIn 0.3s ease; }
+    .toast-success { border-left-color: var(--color-success); }
+    .toast-error { border-left-color: var(--color-danger); }
+    .toast-warning { border-left-color: var(--color-warning); }
+    .toast-info { border-left-color: var(--color-primary); }
+    .toast-title { font-weight: 600; color: var(--color-gray-800); margin-bottom: var(--space-1); }
+    .toast-message { font-size: var(--text-sm); color: var(--color-gray-600); }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; visibility: hidden; transition: all 0.2s; }
+    .modal-overlay.active { opacity: 1; visibility: visible; }
+    .modal { background: white; border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); max-width: 500px; width: 90%; max-height: 80vh; overflow: auto; transform: scale(0.9); transition: transform 0.2s; }
+    .modal-overlay.active .modal { transform: scale(1); }
+    .modal-header { padding: var(--space-4) var(--space-6); border-bottom: 1px solid var(--color-gray-200); display: flex; justify-content: space-between; align-items: center; }
+    .modal-title { font-size: var(--text-lg); font-weight: 600; color: var(--color-gray-900); }
+    .modal-close { background: none; border: none; font-size: var(--text-xl); color: var(--color-gray-400); cursor: pointer; padding: var(--space-2); }
+    .modal-close:hover { color: var(--color-gray-600); }
+    .modal-body { padding: var(--space-6); }
+    .modal-footer { padding: var(--space-4) var(--space-6); border-top: 1px solid var(--color-gray-200); display: flex; justify-content: flex-end; gap: var(--space-3); }
+    
+    /* Mapping Form */
+    .mapping-form { margin-top: var(--space-6); }
+    .mapping-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-6); }
+    .mapping-actions { display: flex; justify-content: flex-end; gap: var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--color-gray-200); }
+    
+    /* Utility */
+    .text-muted { color: var(--color-gray-500); }
+    .text-sm { font-size: var(--text-sm); }
+    .text-center { text-align: center; }
+    .mt-2 { margin-top: var(--space-2); }
+    .mb-4 { margin-bottom: var(--space-4); }
+    .hidden { display: none !important; }
+    .empty-state { text-align: center; padding: var(--space-12); color: var(--color-gray-500); }
+    .empty-state-icon { font-size: 48px; margin-bottom: var(--space-4); opacity: 0.5; }
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.75s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="page-header">
+      <div class="page-header-left">
+        <h1>📦 Woo Product Updater</h1>
+        <p>Upload CSVs, configure mappings, and manage product updates</p>
+      </div>
+      <div class="page-header-right">
+        <a href="/admin/queues" target="_blank" class="btn btn-secondary btn-sm">📊 Bull Dashboard</a>
+        <button type="button" id="refresh-btn" class="btn btn-secondary btn-sm">🔄 Refresh</button>
+      </div>
+    </header>
+
+    <!-- Upload Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2>📤 Upload CSV File</h2>
+      </div>
+      <form id="upload-form">
+        <div style="display: grid; grid-template-columns: 2fr 1fr auto; gap: var(--space-4); align-items: end;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="file">CSV File</label>
+            <input type="file" id="file" name="file" accept=".csv" class="form-input" required />
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="folder">S3 Folder (optional)</label>
+            <input type="text" id="folder" name="folder" class="form-input" placeholder="e.g. test-uploads/" />
+          </div>
+          <button type="submit" id="upload-btn" class="btn btn-primary" style="height: 46px;">
+            <span class="btn-text">Upload</span>
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Mapping Editor Container -->
+    <div id="mapping-container"></div>
+
+    <!-- Files Section -->
+    <div class="card">
+      <div class="card-header">
+        <h2>📁 Registered Files</h2>
+        <span id="files-count" class="text-muted text-sm"></span>
+      </div>
+      <div id="files-wrapper">
+        <div class="empty-state">
+          <div class="empty-state-icon">📂</div>
+          <p>Loading files...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Confirm Modal -->
+  <div id="confirm-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title" id="confirm-modal-title">Confirm Action</h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-modal-message">Are you sure?</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-danger" id="confirm-modal-btn" onclick="confirmModalAction()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ========== CONFIGURATION ==========
+    const CONFIG = {
+      API: {
+        MAPPINGS: '/api/csv-mappings',
+        UPLOAD: '/api/upload-csv'
+      },
+      PROGRESS_INTERVAL: 5000,
+      TOAST_DURATION: 4000
+    };
+
+    let progressIntervals = {};
+    let pendingModalAction = null;
+
+    // ========== UTILITY FUNCTIONS ==========
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function setLoading(btn, loading) {
+      if (loading) {
+        btn.disabled = true;
+        btn.dataset.originalText = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner"></span> Loading...';
+      } else {
+        btn.disabled = false;
+        btn.innerHTML = btn.dataset.originalText || btn.innerHTML;
+      }
+    }
+
+    function showToast(message, type = 'info', title = '') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.innerHTML = `
+        <div class="toast-content">
+          ${title ? `<div class="toast-title">${escapeHtml(title)}</div>` : ''}
+          <div class="toast-message">${escapeHtml(message)}</div>
+        </div>
+      `;
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), CONFIG.TOAST_DURATION);
+    }
+
+    function showModal(title, message, btnText, btnClass, action) {
+      document.getElementById('confirm-modal-title').textContent = title;
+      document.getElementById('confirm-modal-message').textContent = message;
+      const btn = document.getElementById('confirm-modal-btn');
+      btn.textContent = btnText;
+      btn.className = `btn ${btnClass}`;
+      pendingModalAction = action;
+      document.getElementById('confirm-modal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('confirm-modal').classList.remove('active');
+      pendingModalAction = null;
+    }
+
+    function confirmModalAction() {
+      if (pendingModalAction) {
+        pendingModalAction();
+      }
+      closeModal();
+    }
+
+    // ========== API FUNCTIONS ==========
+    async function apiRequest(url, options = {}) {
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || `Request failed: ${response.status}`);
+      }
+      return response.json();
+    }
+
+    async function fetchFiles() {
+      try {
+        const data = await apiRequest(CONFIG.API.MAPPINGS);
+        return data.files || [];
+      } catch (error) {
+        console.error('Fetch files error:', error);
+        showToast('Failed to load files', 'error');
+        return [];
+      }
+    }
+
+    async function fetchProgress(fileKey) {
+      try {
+        return await apiRequest(`${CONFIG.API.MAPPINGS}/${encodeURIComponent(fileKey)}/progress`);
+      } catch (error) {
+        console.error('Fetch progress error:', error);
+        return null;
+      }
+    }
+
+    async function fetchMissingProducts(fileKey) {
+      try {
+        return await apiRequest(`/api/missing-products/${encodeURIComponent(fileKey)}`);
+      } catch (error) {
+        console.error('Fetch missing products error:', error);
+        return null;
+      }
+    }
+
+    // ========== FILE CARD RENDERING ==========
+    function getStatusBadge(file, progress) {
+      if (progress && progress.status === 'completed') {
+        return '<span class="badge badge-completed">Completed</span>';
+      }
+      if (progress && progress.status === 'processing') {
+        return '<span class="badge badge-processing">Processing</span>';
+      }
+      if (file.status === 'ready') {
+        return '<span class="badge badge-ready">Ready</span>';
+      }
+      return '<span class="badge badge-pending">Pending</span>';
+    }
+
+    function renderProgressBar(progress) {
+      if (!progress) {
+        return `
+          <div class="progress-section">
+            <div class="progress-header">
+              <span class="progress-label">Progress</span>
+              <span class="progress-value">Not started</span>
+            </div>
+            <div class="progress-bar-container">
+              <div class="progress-bar progress-bar-pending" style="width: 0%"></div>
+            </div>
+          </div>
+        `;
+      }
+
+      const percentage = progress.percentage || 0;
+      const barClass = progress.status === 'completed' ? 'progress-bar-completed' : 
+                       progress.status === 'processing' ? 'progress-bar-processing' : 'progress-bar-pending';
+
+      return `
+        <div class="progress-section">
+          <div class="progress-header">
+            <span class="progress-label">Progress</span>
+            <span class="progress-value">${progress.processedRows}/${progress.totalRows} rows (${percentage}%)</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar ${barClass}" style="width: ${percentage}%"></div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderStats(progress) {
+      if (!progress || progress.totalRows === 0) {
+        return '';
+      }
+      return `
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value">${progress.totalRows}</div>
+            <div class="stat-label">Total</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value success">${progress.updated || 0}</div>
+            <div class="stat-label">Updated</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value warning">${progress.skipped || 0}</div>
+            <div class="stat-label">Skipped</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value danger">${progress.failed || 0}</div>
+            <div class="stat-label">Failed</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderMissingAlert(progress) {
+      if (!progress || !progress.missingProductsCount) {
+        return '';
+      }
+      return `
+        <div class="missing-alert">
+          <span class="missing-alert-text">⚠️ Missing products detected</span>
+          <span class="missing-alert-count">${progress.missingProductsCount}</span>
+        </div>
+      `;
+    }
+
+    function renderFileCard(file, progress) {
+      const uploadDate = file.uploadedAt 
+        ? new Date(file.uploadedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : 'Unknown';
+
+      const isCompleted = progress && progress.status === 'completed';
+      const hasMissing = progress && progress.missingProductsCount > 0;
+      const hasMapping = file.mapping && file.mapping.partNumber;
+
+      return `
+        <div class="file-card" data-file-key="${escapeHtml(file.fileKey)}">
+          <div class="file-card-header">
+            <div class="file-card-title">${escapeHtml(file.fileKey)}</div>
+            <div class="file-card-meta">
+              ${getStatusBadge(file, progress)}
+              <span>${uploadDate}</span>
+            </div>
+          </div>
+          <div class="file-card-body">
+            ${renderProgressBar(progress)}
+            ${renderStats(progress)}
+            ${renderMissingAlert(progress)}
+          </div>
+          <div class="file-card-footer">
+            <div class="btn-group">
+              <button class="btn btn-secondary btn-sm" onclick="loadMappingEditor('${escapeHtml(file.fileKey).replace(/'/g, "\\'")}')">
+                ⚙️ Configure
+              </button>
+              ${isCompleted && hasMissing ? `
+                <button class="btn btn-purple btn-sm" onclick="showCreateProductsModal('${escapeHtml(file.fileKey).replace(/'/g, "\\'")}')">
+                  ➕ Create Products
+                </button>
+              ` : ''}
+              ${hasMapping ? `
+                <button class="btn btn-warning btn-sm" onclick="reprocessFile('${escapeHtml(file.fileKey).replace(/'/g, "\\'")}')">
+                  🔄 Reprocess
+                </button>
+              ` : ''}
+              <button class="btn btn-danger btn-sm" onclick="deleteFile('${escapeHtml(file.fileKey).replace(/'/g, "\\'")}')">
+                🗑️
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderFiles(files) {
+      const wrapper = document.getElementById('files-wrapper');
+      const countEl = document.getElementById('files-count');
+      
+      countEl.textContent = `${files.length} file(s)`;
+
+      if (!files.length) {
+        wrapper.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📂</div>
+            <p>No files registered yet. Upload a CSV to get started.</p>
+          </div>
+        `;
+        return;
+      }
+
+      // Clear old intervals
+      Object.values(progressIntervals).forEach(clearInterval);
+      progressIntervals = {};
+
+      // Fetch progress for all files
+      const progressPromises = files.map(f => fetchProgress(f.fileKey));
+      const progressData = await Promise.all(progressPromises);
+
+      // Render cards
+      let html = '<div class="files-grid">';
+      files.forEach((file, i) => {
+        html += renderFileCard(file, progressData[i]);
+      });
+      html += '</div>';
+      wrapper.innerHTML = html;
+
+      // Set up progress polling for non-completed files
+      files.forEach((file, i) => {
+        const progress = progressData[i];
+        if (!progress || (progress.status !== 'completed' && file.status === 'ready')) {
+          startProgressPolling(file.fileKey);
+        }
+      });
+    }
+
+    function startProgressPolling(fileKey) {
+      if (progressIntervals[fileKey]) return;
+      
+      progressIntervals[fileKey] = setInterval(async () => {
+        const progress = await fetchProgress(fileKey);
+        if (progress) {
+          updateFileCardProgress(fileKey, progress);
+          if (progress.status === 'completed') {
+            clearInterval(progressIntervals[fileKey]);
+            delete progressIntervals[fileKey];
+            // Refresh to show create products button
+            loadAndRenderFiles();
+          }
+        }
+      }, CONFIG.PROGRESS_INTERVAL);
+    }
+
+    function updateFileCardProgress(fileKey, progress) {
+      const card = document.querySelector(`.file-card[data-file-key="${CSS.escape(fileKey)}"]`);
+      if (!card) return;
+      
+      const body = card.querySelector('.file-card-body');
+      if (body) {
+        body.innerHTML = renderProgressBar(progress) + renderStats(progress) + renderMissingAlert(progress);
+      }
+
+      // Update badge
+      const metaDiv = card.querySelector('.file-card-meta');
+      if (metaDiv) {
+        const badgeEl = metaDiv.querySelector('.badge');
+        if (badgeEl) {
+          if (progress.status === 'completed') {
+            badgeEl.className = 'badge badge-completed';
+            badgeEl.textContent = 'Completed';
+          } else if (progress.status === 'processing') {
+            badgeEl.className = 'badge badge-processing';
+            badgeEl.textContent = 'Processing';
+          }
+        }
+      }
+    }
+
+    // ========== FILE ACTIONS ==========
+    async function reprocessFile(fileKey) {
+      showModal(
+        'Reprocess File',
+        `This will reset progress for "${fileKey}" and queue it for reprocessing. Continue?`,
+        'Reprocess',
+        'btn-warning',
+        async () => {
+          try {
+            await apiRequest(`${CONFIG.API.MAPPINGS}/${encodeURIComponent(fileKey)}/reprocess`, { method: 'POST' });
+            showToast('File queued for reprocessing', 'success');
+            await loadAndRenderFiles();
+          } catch (error) {
+            showToast(error.message, 'error');
+          }
+        }
+      );
+    }
+
+    async function deleteFile(fileKey) {
+      showModal(
+        'Delete File',
+        `Are you sure you want to remove "${fileKey}" from the registry? The file will remain in S3.`,
+        'Delete',
+        'btn-danger',
+        async () => {
+          try {
+            await apiRequest(`${CONFIG.API.MAPPINGS}/${encodeURIComponent(fileKey)}`, { method: 'DELETE' });
+            showToast('File removed from registry', 'success');
+            await loadAndRenderFiles();
+          } catch (error) {
+            showToast(error.message, 'error');
+          }
+        }
+      );
+    }
+
+    async function showCreateProductsModal(fileKey) {
+      const missingData = await fetchMissingProducts(fileKey);
+      if (!missingData || !missingData.count) {
+        showToast('No missing products found', 'warning');
+        return;
+      }
+
+      const categories = missingData.categories || ['unknown'];
+      let categoryOptions = categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+
+      showModal(
+        'Create Missing Products',
+        `Found ${missingData.count} missing product(s). Select a category to create them in:`,
+        'Create Products',
+        'btn-purple',
+        async () => {
+          const select = document.getElementById('create-category-select');
+          if (!select) return;
+          const categorySlug = select.value;
+          
+          try {
+            showToast('Creating products... This may take a while.', 'info');
+            const result = await apiRequest(`/api/missing-products/${encodeURIComponent(fileKey)}/create`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ categorySlug })
+            });
+            showToast('Products created successfully!', 'success');
+            await loadAndRenderFiles();
+          } catch (error) {
+            showToast(error.message, 'error');
+          }
+        }
+      );
+
+      // Add category select to modal body
+      setTimeout(() => {
+        const modalBody = document.querySelector('#confirm-modal .modal-body');
+        if (modalBody && !document.getElementById('create-category-select')) {
+          modalBody.innerHTML += `
+            <div class="form-group" style="margin-top: var(--space-4);">
+              <label class="form-label">Category</label>
+              <select id="create-category-select" class="form-select">${categoryOptions}</select>
+            </div>
+          `;
+        }
+      }, 50);
+    }
+
+    // ========== MAPPING EDITOR ==========
+    async function loadMappingEditor(fileKey) {
+      try {
+        const data = await apiRequest(`${CONFIG.API.MAPPINGS}/${encodeURIComponent(fileKey)}`);
+        if (!data) return;
+
+        const container = document.getElementById('mapping-container');
+        container.innerHTML = `
+          <div class="card mapping-form">
+            <div class="card-header">
+              <div>
+                <h2>⚙️ Configure Column Mapping</h2>
+                <p class="text-muted text-sm mt-2">${escapeHtml(data.fileKey)}</p>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="closeMappingEditor()">✕ Close</button>
+            </div>
+            <form id="mapping-form">
+              <div class="mapping-grid">
+                ${createMappingField('partNumber', 'Part Number', 'Primary identifier column', data)}
+                ${createMappingField('category', 'Category', 'Product category column', data)}
+                ${createMappingField('manufacturer', 'Manufacturer', 'Manufacturer name column', data)}
+              </div>
+              <div class="mapping-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeMappingEditor()">Cancel</button>
+                <button type="submit" class="btn btn-success" id="save-mapping-btn">💾 Save Mapping</button>
+              </div>
+            </form>
+          </div>
+        `;
+        container.dataset.fileKey = data.fileKey;
+        
+        document.getElementById('mapping-form').addEventListener('submit', handleMappingSubmit);
+        container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (error) {
+        showToast(error.message, 'error');
+      }
+    }
+
+    function createMappingField(key, label, description, data) {
+      const headers = data.headers || [];
+      const currentValue = (data.mapping && data.mapping[key]) || '';
+      let optionsHTML = '<option value="">-- Select Column --</option>';
+      headers.forEach(h => {
+        optionsHTML += `<option value="${escapeHtml(h)}"${h === currentValue ? ' selected' : ''}>${escapeHtml(h)}</option>`;
+      });
+      return `
+        <div class="form-group">
+          <label class="form-label" for="mapping-${key}">${label}</label>
+          <select id="mapping-${key}" name="${key}" class="form-select" required>${optionsHTML}</select>
+          <p class="form-help">${description}</p>
+        </div>
+      `;
+    }
+
+    function closeMappingEditor() {
+      document.getElementById('mapping-container').innerHTML = '';
+    }
+
+    async function handleMappingSubmit(event) {
+      event.preventDefault();
+      const fileKey = document.getElementById('mapping-container').dataset.fileKey;
+      const btn = document.getElementById('save-mapping-btn');
+      
+      const payload = {
+        partNumber: document.getElementById('mapping-partNumber').value,
+        category: document.getElementById('mapping-category').value,
+        manufacturer: document.getElementById('mapping-manufacturer').value
+      };
+
+      if (!payload.partNumber || !payload.category || !payload.manufacturer) {
+        showToast('Please select a column for each field', 'warning');
+        return;
+      }
+
+      setLoading(btn, true);
+      try {
+        await apiRequest(`${CONFIG.API.MAPPINGS}/${encodeURIComponent(fileKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        showToast('Mapping saved successfully!', 'success');
+        closeMappingEditor();
+        await loadAndRenderFiles();
+      } catch (error) {
+        showToast(error.message, 'error');
+      } finally {
+        setLoading(btn, false);
+      }
+    }
+
+    // ========== MAIN FUNCTIONS ==========
+    async function loadAndRenderFiles() {
+      const files = await fetchFiles();
+      await renderFiles(files);
+    }
+
+    // ========== EVENT LISTENERS ==========
+    document.getElementById('upload-form').addEventListener('submit', async function(event) {
+      event.preventDefault();
+      const fileInput = document.getElementById('file');
+      const folderInput = document.getElementById('folder');
+      const btn = document.getElementById('upload-btn');
+
+      if (!fileInput.files.length) {
+        showToast('Please select a file', 'warning');
+        return;
+      }
+
+      const file = fileInput.files[0];
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        showToast('Please select a CSV file', 'warning');
+        return;
+      }
+
+      setLoading(btn, true);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const folder = folderInput.value.trim();
+        if (folder) formData.append('folder', folder);
+
+        const response = await fetch(CONFIG.API.UPLOAD, { method: 'POST', body: formData });
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || 'Upload failed');
+        }
+        const data = await response.json();
+        showToast(`File uploaded: ${data.fileKey}`, 'success', 'Upload Complete');
+        fileInput.value = '';
+        folderInput.value = '';
+        await loadAndRenderFiles();
+      } catch (error) {
+        showToast(error.message, 'error');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', async function(event) {
+      const btn = event.currentTarget;
+      setLoading(btn, true);
+      try {
+        await loadAndRenderFiles();
+        showToast('Refreshed', 'info');
+      } finally {
+        setLoading(btn, false);
+      }
+    });
+
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') {
+        closeMappingEditor();
+        closeModal();
+      }
+    });
+
+    // Click outside modal to close
+    document.getElementById('confirm-modal').addEventListener('click', function(event) {
+      if (event.target === this) closeModal();
+    });
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', loadAndRenderFiles);
+  </script>
+</body>
+</html>

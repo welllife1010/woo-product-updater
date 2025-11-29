@@ -26,6 +26,7 @@ updated-products-*
 process_checkpoint.json
 update-progress.txt
 *backup*.js 
+.*backup*
 
 # Logs
 logs

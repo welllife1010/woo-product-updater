@@ -1,92 +1,88 @@
 #!/bin/bash
 # =============================================================================
-# RESET AND RESTART SCRIPT
+# reset-and-restart.sh - Complete reset for WooCommerce Product Updater
 # =============================================================================
-# Usage: ./scripts/reset-and-restart.sh [--full]
-#   --full : Also clears csv-mappings.json (requires re-upload of files)
+# Usage:
+#   ./scripts/reset-and-restart.sh              # Normal reset (keeps csv-mappings.json)
+#   ./scripts/reset-and-restart.sh --full       # Full reset (clears everything)
+#   ./scripts/reset-and-restart.sh <fileKey>    # Reset specific file only
 # =============================================================================
 
 set -e
 cd /home/ubuntu/woo-product-update
 
-echo "=============================================="
-echo "🔄 WooCommerce Product Updater - Reset Script"
-echo "=============================================="
+echo "🛑 Stopping all PM2 processes..."
+pm2 stop all
 
-# Parse arguments
-FULL_RESET=false
 if [ "$1" == "--full" ]; then
-    FULL_RESET=true
-    echo "⚠️  FULL RESET MODE - Will clear file registrations too"
-fi
-
-echo ""
-echo "📦 Step 1: Stopping PM2 processes..."
-pm2 stop all 2>/dev/null || true
-
-echo ""
-echo "🗑️  Step 2: Clearing batch status..."
-rm -rf batch_status/*
-echo "   ✅ batch_status/ cleared"
-
-echo ""
-echo "🗑️  Step 3: Clearing checkpoint file..."
-rm -f process_checkpoint.json
-echo "   ✅ process_checkpoint.json removed"
-
-echo ""
-echo "🗑️  Step 4: Clearing Redis databases..."
-redis-cli FLUSHALL > /dev/null
-echo "   ✅ Redis flushed"
-
-echo ""
-echo "🗑️  Step 5: Clearing missing-products folders..."
-rm -rf missing-products/*
-mkdir -p missing-products
-echo "   ✅ missing-products/ cleared"
-
-if [ "$FULL_RESET" = true ]; then
-    echo ""
-    echo "🗑️  Step 6: Resetting csv-mappings.json..."
+    echo "🗑️  FULL RESET - Clearing everything including csv-mappings.json..."
+    redis-cli FLUSHALL
+    rm -f process_checkpoint.json
+    rm -rf batch_status/*
+    rm -rf missing-products/missing-*/*.json
+    rm -f csv-mappings.json
     echo '{"files":[]}' > csv-mappings.json
-    echo "   ✅ csv-mappings.json reset (you'll need to re-upload files)"
+    > output-files/info-log.txt
+    > output-files/error-log.txt
+elif [ -n "$1" ]; then
+    echo "🔄 Resetting specific file: $1"
+    CLEAN_KEY=$(echo "$1" | sed 's/\.csv$//' | tr '/' '_')
+    
+    # Clear Redis keys for this file
+    redis-cli -n 0 EVAL "for _,k in ipairs(redis.call('keys','bull:*')) do redis.call('del',k) end" 0
+    redis-cli -n 1 KEYS "*${CLEAN_KEY}*" | xargs -r redis-cli -n 1 DEL
+    redis-cli -n 1 KEYS "*$1*" | xargs -r redis-cli -n 1 DEL
+    
+    # Clear checkpoint for this file
+    if [ -f process_checkpoint.json ]; then
+        node -e "
+        const fs = require('fs');
+        const cp = JSON.parse(fs.readFileSync('process_checkpoint.json', 'utf8'));
+        delete cp['$1'];
+        fs.writeFileSync('process_checkpoint.json', JSON.stringify(cp, null, 2));
+        " 2>/dev/null || true
+    fi
+    
+    # Clear batch_status for this file
+    rm -rf "batch_status/${1%/*}" 2>/dev/null || true
+    
+    # Clear missing products for this file
+    find missing-products/ -name "*${CLEAN_KEY}*" -delete 2>/dev/null || true
+    
+    # Set status to ready in csv-mappings.json
+    node -e "
+    const fs = require('fs');
+    const mappings = JSON.parse(fs.readFileSync('csv-mappings.json', 'utf8'));
+    const idx = mappings.files.findIndex(f => f.fileKey === '$1');
+    if (idx !== -1) {
+        mappings.files[idx].status = 'ready';
+        fs.writeFileSync('csv-mappings.json', JSON.stringify(mappings, null, 2));
+        console.log('✅ Set $1 status to ready');
+    }
+    " 2>/dev/null || true
+else
+    echo "🧹 Normal reset - Clearing state but keeping csv-mappings.json..."
+    redis-cli FLUSHALL
+    rm -f process_checkpoint.json
+    rm -rf batch_status/*
+    rm -rf missing-products/missing-*/*.json
 fi
 
-echo ""
-echo "📝 Step 7: Clearing log files..."
-> output-files/info-log.txt
-> output-files/error-log.txt
-echo "   ✅ Log files cleared"
+echo "🔄 Flushing PM2 logs..."
+pm2 flush
+
+echo "🚀 Starting all services..."
+pm2 start woo-update-app woo-worker csv-mapping-ui
+
+echo "⏳ Waiting for startup..."
+sleep 5
 
 echo ""
-echo "🔄 Step 8: Flushing PM2 logs..."
-pm2 flush > /dev/null 2>&1 || true
-echo "   ✅ PM2 logs flushed"
-
-echo ""
-echo "🚀 Step 9: Starting PM2 processes..."
-pm2 delete all 2>/dev/null || true
-pm2 start ecosystem.config.js --env staging
-pm2 save
-
-echo ""
-echo "⏳ Waiting for processes to start..."
-sleep 3
-
-echo ""
-echo "📊 Step 10: Current status:"
-pm2 status
-
-echo ""
-echo "=============================================="
 echo "✅ Reset complete!"
+pm2 status
 echo ""
-echo "📝 Next steps:"
-echo "   1. Upload CSV at: http://$(curl -s http://checkip.amazonaws.com):4000"
-echo "   2. Configure mapping and save"
-echo "   3. Watch logs: pm2 logs woo-worker"
-echo "=============================================="
-EOF
-
-chmod +x ~/woo-product-update/scripts/reset-and-restart.sh
-echo "✅ Script created at scripts/reset-and-restart.sh"
+echo "📊 Next steps:"
+echo "   - View logs: pm2 logs"
+echo "   - Check info: tail -f output-files/info-log.txt"
+echo "   - UI: http://18.144.155.64:4000"
+echo "   - Bull Dashboard: http://18.144.155.64:3000/admin/queues"

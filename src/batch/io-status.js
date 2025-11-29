@@ -110,7 +110,7 @@ const recordMissingProduct = (
 ) => {
   try {
     // 1) Drop the ".csv" extension so we can reuse the base filename.
-    const cleanFileKey = fileKey.replace(/\.csv$/i, "");
+    const cleanFileKey = fileKey.replace(/\.csv$/i, "").replace(/\//g, "_");
 
     // 2) Make sure slug is safe to use in a folder name.
     //    (If resolver gave us "", fall back to "unknown".)

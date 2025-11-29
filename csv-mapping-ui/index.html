@@ -1,188 +1,487 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Woo Product Updater</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Woo Product Updater | Admin Dashboard</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f9fafb; color: #374151; line-height: 1.6; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-    h1 { font-size: 1.875rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
-    .subtitle { color: #6b7280; margin-bottom: 32px; }
-    .card { background: white; border-radius: 8px; border: 1px solid #e5e7eb; padding: 24px; margin-bottom: 24px; }
-    .card h2 { font-size: 1.25rem; font-weight: 600; color: #1f2937; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #f3f4f6; }
-    .form-group { margin-bottom: 16px; }
-    label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 8px; }
-    input, select { width: 100%; padding: 12px; font-size: 1rem; border: 1px solid #d1d5db; border-radius: 6px; }
-    input:focus, select:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px #dbeafe; }
-    .help { font-size: 0.875rem; color: #6b7280; margin-top: 4px; }
-    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; font-size: 0.875rem; font-weight: 500; border: none; border-radius: 6px; cursor: pointer; }
-    .btn-primary { background: #2563eb; color: white; }
-    .btn-primary:hover { background: #1d4ed8; }
-    .btn-secondary { background: white; color: #374151; border: 1px solid #d1d5db; }
-    .btn-secondary:hover { background: #f9fafb; }
-    .btn-success { background: #059669; color: white; }
-    .btn-sm { padding: 8px 12px; font-size: 0.75rem; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-    th { background: #f9fafb; padding: 12px; text-align: left; font-weight: 600; color: #4b5563; text-transform: uppercase; font-size: 0.75rem; border-bottom: 1px solid #e5e7eb; }
-    td { padding: 16px 12px; border-bottom: 1px solid #f3f4f6; }
-    tr:hover { background: #f9fafb; }
-    .file-key { font-family: monospace; font-size: 0.75rem; word-break: break-all; }
-    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; font-size: 0.75rem; font-weight: 600; border-radius: 9999px; text-transform: uppercase; }
-    .badge-pending { background: #fef3c7; color: #d97706; }
-    .badge-ready { background: #d1fae5; color: #059669; }
+    :root {
+      --color-primary: #2563eb;
+      --color-primary-hover: #1d4ed8;
+      --color-primary-light: #dbeafe;
+      --color-success: #059669;
+      --color-success-light: #d1fae5;
+      --color-warning: #d97706;
+      --color-warning-light: #fef3c7;
+      --color-danger: #dc2626;
+      --color-danger-light: #fee2e2;
+      --color-purple: #7c3aed;
+      --color-purple-light: #ede9fe;
+      --color-gray-50: #f9fafb;
+      --color-gray-100: #f3f4f6;
+      --color-gray-200: #e5e7eb;
+      --color-gray-300: #d1d5db;
+      --color-gray-400: #9ca3af;
+      --color-gray-500: #6b7280;
+      --color-gray-600: #4b5563;
+      --color-gray-700: #374151;
+      --color-gray-800: #1f2937;
+      --color-gray-900: #111827;
+      --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem;
+      --space-5: 1.25rem; --space-6: 1.5rem; --space-8: 2rem;
+      --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, monospace;
+      --text-xs: 0.75rem; --text-sm: 0.875rem; --text-base: 1rem;
+      --text-lg: 1.125rem; --text-xl: 1.25rem; --text-2xl: 1.5rem;
+      --radius-sm: 0.25rem; --radius-md: 0.375rem; --radius-lg: 0.5rem;
+      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+      --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    * { margin: 0; padding: 0; }
+    body { font-family: var(--font-family); font-size: var(--text-base); line-height: 1.6; color: var(--color-gray-700); background: var(--color-gray-50); min-height: 100vh; }
+    .container { max-width: 1400px; margin: 0 auto; padding: var(--space-6); }
+    .page-header { margin-bottom: var(--space-8); padding-bottom: var(--space-6); border-bottom: 1px solid var(--color-gray-200); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-4); }
+    .page-header h1 { font-size: var(--text-2xl); font-weight: 700; color: var(--color-gray-900); }
+    .page-header p { color: var(--color-gray-500); font-size: var(--text-sm); }
+    .header-buttons { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+    .card { background: white; border-radius: var(--radius-lg); border: 1px solid var(--color-gray-200); box-shadow: var(--shadow-sm); padding: var(--space-6); margin-bottom: var(--space-6); }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); padding-bottom: var(--space-4); border-bottom: 1px solid var(--color-gray-100); }
+    .card-header h2 { font-size: var(--text-xl); font-weight: 600; color: var(--color-gray-800); }
+    .form-group { margin-bottom: var(--space-4); }
+    .form-label { display: block; font-size: var(--text-sm); font-weight: 500; color: var(--color-gray-700); margin-bottom: var(--space-2); }
+    .form-input, .form-select { display: block; width: 100%; padding: var(--space-3) var(--space-4); font-size: var(--text-base); color: var(--color-gray-700); background: white; border: 1px solid var(--color-gray-300); border-radius: var(--radius-md); }
+    .form-input:focus, .form-select:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-light); }
+    .form-help { font-size: var(--text-sm); color: var(--color-gray-500); margin-top: var(--space-1); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); font-size: var(--text-sm); font-weight: 500; border: none; border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-primary { background: var(--color-primary); color: white; }
+    .btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); }
+    .btn-secondary { background: white; color: var(--color-gray-700); border: 1px solid var(--color-gray-300); }
+    .btn-secondary:hover:not(:disabled) { background: var(--color-gray-50); }
+    .btn-success { background: var(--color-success); color: white; }
+    .btn-success:hover:not(:disabled) { background: #047857; }
+    .btn-warning { background: var(--color-warning); color: white; }
+    .btn-warning:hover:not(:disabled) { background: #b45309; }
+    .btn-danger { background: var(--color-danger); color: white; }
+    .btn-danger:hover:not(:disabled) { background: #b91c1c; }
+    .btn-purple { background: var(--color-purple); color: white; }
+    .btn-purple:hover:not(:disabled) { background: #6d28d9; }
+    .btn-sm { padding: var(--space-1) var(--space-3); font-size: var(--text-xs); }
+    
+    .files-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: var(--space-4); }
+    .file-card { background: white; border-radius: var(--radius-lg); border: 1px solid var(--color-gray-200); overflow: hidden; }
+    .file-card:hover { box-shadow: var(--shadow-md); }
+    .file-card-header { padding: var(--space-4); background: var(--color-gray-50); border-bottom: 1px solid var(--color-gray-100); }
+    .file-card-title { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-gray-700); word-break: break-all; font-weight: 500; }
+    .file-card-meta { display: flex; justify-content: space-between; align-items: center; margin-top: var(--space-2); font-size: var(--text-xs); color: var(--color-gray-500); }
+    .file-card-body { padding: var(--space-4); }
+    .file-card-footer { padding: var(--space-3) var(--space-4); background: var(--color-gray-50); border-top: 1px solid var(--color-gray-100); display: flex; gap: var(--space-2); flex-wrap: wrap; }
+    
+    .progress-section { margin-bottom: var(--space-3); }
+    .progress-header { display: flex; justify-content: space-between; margin-bottom: var(--space-1); font-size: var(--text-sm); }
+    .progress-bar-bg { height: 8px; background: var(--color-gray-200); border-radius: 9999px; overflow: hidden; }
+    .progress-bar { height: 100%; border-radius: 9999px; transition: width 0.5s; }
+    .progress-bar.pending { background: var(--color-gray-400); }
+    .progress-bar.processing { background: linear-gradient(90deg, var(--color-primary), var(--color-purple)); }
+    .progress-bar.completed { background: var(--color-success); }
+    
+    .stats-row { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); }
+    .stat { flex: 1; text-align: center; padding: var(--space-2); background: var(--color-gray-50); border-radius: var(--radius-sm); }
+    .stat-value { font-size: var(--text-lg); font-weight: 700; }
+    .stat-label { font-size: 10px; color: var(--color-gray-500); text-transform: uppercase; }
+    .stat-value.text-success { color: var(--color-success); }
+    .stat-value.text-warning { color: var(--color-warning); }
+    .stat-value.text-danger { color: var(--color-danger); }
+    
+    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; font-size: 10px; font-weight: 600; border-radius: 9999px; text-transform: uppercase; }
     .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-    .empty { text-align: center; padding: 48px; color: #6b7280; }
-    .toast-container { position: fixed; top: 24px; right: 24px; z-index: 1000; }
-    .toast { display: flex; gap: 12px; padding: 16px; background: white; border-radius: 8px; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); border-left: 4px solid #6b7280; margin-bottom: 12px; max-width: 400px; }
-    .toast-success { border-left-color: #059669; }
-    .toast-error { border-left-color: #dc2626; }
-    .toast-title { font-weight: 600; color: #1f2937; }
-    .toast-message { font-size: 0.875rem; color: #4b5563; }
-    .spinner { width: 16px; height: 16px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.6s linear infinite; }
+    .badge-pending { background: var(--color-warning-light); color: var(--color-warning); }
+    .badge-ready { background: var(--color-primary-light); color: var(--color-primary); }
+    .badge-processing { background: var(--color-purple-light); color: var(--color-purple); }
+    .badge-completed { background: var(--color-success-light); color: var(--color-success); }
+    
+    .missing-alert { background: var(--color-purple-light); border: 1px solid var(--color-purple); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-3); }
+    .missing-alert span { font-size: var(--text-sm); color: var(--color-purple); font-weight: 500; }
+    
+    .toast-container { position: fixed; top: var(--space-4); right: var(--space-4); z-index: 1000; display: flex; flex-direction: column; gap: var(--space-2); }
+    .toast { padding: var(--space-3) var(--space-4); background: white; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); border-left: 4px solid var(--color-gray-400); max-width: 350px; animation: slideIn 0.3s; }
+    .toast-success { border-left-color: var(--color-success); }
+    .toast-error { border-left-color: var(--color-danger); }
+    .toast-warning { border-left-color: var(--color-warning); }
+    .toast-info { border-left-color: var(--color-primary); }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; visibility: hidden; transition: all 0.2s; }
+    .modal-overlay.active { opacity: 1; visibility: visible; }
+    .modal { background: white; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); max-width: 450px; width: 90%; }
+    .modal-header { padding: var(--space-4); border-bottom: 1px solid var(--color-gray-200); display: flex; justify-content: space-between; align-items: center; }
+    .modal-title { font-size: var(--text-lg); font-weight: 600; }
+    .modal-close { background: none; border: none; font-size: 24px; color: var(--color-gray-400); cursor: pointer; }
+    .modal-body { padding: var(--space-4); }
+    .modal-footer { padding: var(--space-4); border-top: 1px solid var(--color-gray-200); display: flex; justify-content: flex-end; gap: var(--space-2); }
+    
+    .mapping-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-4); }
+    .empty-state { text-align: center; padding: var(--space-8); color: var(--color-gray-500); }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .mapping-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 24px; }
-    .mapping-field { background: #f9fafb; padding: 16px; border-radius: 6px; border: 1px solid #e5e7eb; }
-    .mapping-actions { display: flex; gap: 12px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid #e5e7eb; }
   </style>
 </head>
 <body>
-  <div id="toast-container" class="toast-container"></div>
   <div class="container">
-    <h1>CSV Column Mapping</h1>
-    <p class="subtitle">Upload CSV files and configure column mappings for the WooCommerce product updater.</p>
+    <header class="page-header">
+      <div>
+        <h1>📦 Woo Product Updater</h1>
+        <p>Upload CSVs, configure mappings, manage product updates</p>
+      </div>
+      <div class="header-buttons">
+        <a href="http://18.144.155.64:3000/admin/queues" target="_blank" class="btn btn-secondary btn-sm">📊 Bull Dashboard</a>
+        <button id="refresh-btn" class="btn btn-secondary btn-sm">🔄 Refresh</button>
+        <button id="start-processing-btn" class="btn btn-success btn-sm">▶️ Start Processing</button>
+      </div>
+    </header>
 
     <div class="card">
-      <h2>Upload CSV File</h2>
+      <div class="card-header"><h2>📤 Upload CSV File</h2></div>
       <form id="upload-form">
-        <div class="form-group">
-          <label for="file">CSV File *</label>
-          <input type="file" id="file" name="file" accept=".csv" required>
-          <p class="help">Upload a CSV file containing product data.</p>
+        <div style="display: grid; grid-template-columns: 2fr 1fr auto; gap: var(--space-4); align-items: end;">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">CSV File</label>
+            <input type="file" id="file" accept=".csv" class="form-input" required />
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">S3 Folder (optional)</label>
+            <input type="text" id="folder" class="form-input" placeholder="e.g. test-uploads/" />
+          </div>
+          <button type="submit" id="upload-btn" class="btn btn-primary" style="height:44px">Upload</button>
         </div>
-        <div class="form-group">
-          <label for="folder">S3 Folder (Optional)</label>
-          <input type="text" id="folder" name="folder" placeholder="e.g., vendor-uploads/2025/">
-          <p class="help">Optional S3 folder path.</p>
-        </div>
-        <button type="submit" id="upload-btn" class="btn btn-primary">Upload to S3</button>
       </form>
     </div>
 
-    <div class="card">
-      <h2 style="display: flex; justify-content: space-between; align-items: center;">
-        Registered Files
-        <button id="refresh-btn" class="btn btn-secondary btn-sm">Refresh</button>
-      </h2>
-      <div id="files-wrapper"><div class="empty"><p>Loading...</p></div></div>
-    </div>
-
     <div id="mapping-container"></div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>📁 Registered Files</h2>
+        <span id="files-count" style="color:var(--color-gray-500);font-size:var(--text-sm)"></span>
+      </div>
+      <div id="files-wrapper"><div class="empty-state">Loading...</div></div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
+
+  <div id="confirm-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-title">Confirm</h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-danger" id="modal-confirm-btn">Confirm</button>
+      </div>
+    </div>
   </div>
 
   <script>
-    function showToast(msg, type) {
-      var c = document.getElementById('toast-container');
-      var t = document.createElement('div');
-      t.className = 'toast toast-' + type;
-      t.innerHTML = '<div><div class="toast-title">' + (type === 'success' ? 'Success' : type === 'error' ? 'Error' : 'Info') + '</div><div class="toast-message">' + msg + '</div></div>';
-      c.appendChild(t);
-      setTimeout(function() { t.remove(); }, 5000);
+    const API = { MAPPINGS: '/api/csv-mappings', UPLOAD: '/api/upload-csv' };
+    let progressTimers = {};
+    let modalCallback = null;
+
+    function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+    
+    function toast(msg, type='info') {
+      const el = document.createElement('div');
+      el.className = `toast toast-${type}`;
+      el.textContent = msg;
+      document.getElementById('toast-container').appendChild(el);
+      setTimeout(() => el.remove(), 4000);
     }
 
-    function setLoading(btn, loading) {
-      if (loading) { btn.disabled = true; btn.dataset.orig = btn.innerHTML; btn.innerHTML = '<span class="spinner"></span> Loading...'; }
-      else { btn.disabled = false; btn.innerHTML = btn.dataset.orig; }
+    function setLoading(btn, on) {
+      if (on) { btn.disabled = true; btn._txt = btn.innerHTML; btn.innerHTML = '<span class="spinner"></span>'; }
+      else { btn.disabled = false; btn.innerHTML = btn._txt || btn.innerHTML; }
     }
 
-    function escapeHtml(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
-    function escapeJs(t) { return String(t||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"'); }
+    function showModal(title, body, btnText, btnClass, cb) {
+      document.getElementById('modal-title').textContent = title;
+      document.getElementById('modal-body').innerHTML = body;
+      const btn = document.getElementById('modal-confirm-btn');
+      btn.textContent = btnText;
+      btn.className = `btn ${btnClass}`;
+      modalCallback = cb;
+      document.getElementById('confirm-modal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('confirm-modal').classList.remove('active');
+      modalCallback = null;
+    }
+
+    document.getElementById('modal-confirm-btn').addEventListener('click', () => {
+      if (modalCallback) modalCallback();
+      closeModal();
+    });
+
+    async function api(url, opts={}) {
+      const r = await fetch(url, opts);
+      if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || r.statusText); }
+      return r.json();
+    }
 
     async function fetchFiles() {
       try {
-        var r = await fetch('/api/csv-mappings');
-        return r.ok ? await r.json() : [];
-      } catch (e) { showToast('Failed to load files', 'error'); return []; }
+        const data = await api(API.MAPPINGS);
+        return Array.isArray(data) ? data : (data.files || []);
+      } catch(e) { toast('Failed to load files', 'error'); return []; }
     }
 
-    function renderFiles(files) {
-      var w = document.getElementById('files-wrapper');
-      if (!files || !files.length) { w.innerHTML = '<div class="empty"><p>No files registered yet. Upload a CSV file to get started.</p></div>'; return; }
-      var h = '<table><thead><tr><th>File Key</th><th>Status</th><th>Uploaded</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-      files.forEach(function(f) {
-        var d = f.uploadedAt ? new Date(f.uploadedAt).toLocaleDateString() : '-';
-        h += '<tr><td class="file-key">' + escapeHtml(f.fileKey) + '</td><td><span class="badge badge-' + f.status + '">' + f.status + '</span></td><td>' + d + '</td><td style="text-align:right"><button class="btn btn-secondary btn-sm" onclick="loadMapping(\'' + escapeJs(f.fileKey) + '\')">Configure</button></td></tr>';
-      });
-      w.innerHTML = h + '</tbody></table>';
+    async function fetchProgress(fileKey) {
+      try { return await api(`${API.MAPPINGS}/${encodeURIComponent(fileKey)}/progress`); }
+      catch(e) { return null; }
     }
 
-    async function loadMapping(fileKey) {
-      try {
-        var r = await fetch('/api/csv-mappings/' + encodeURIComponent(fileKey));
-        if (!r.ok) throw new Error();
-        var data = await r.json();
-        var c = document.getElementById('mapping-container');
-        var opts = '<option value="">-- Select --</option>' + (data.headers||[]).map(function(h) { return '<option value="' + escapeHtml(h) + '">' + escapeHtml(h) + '</option>'; }).join('');
-        c.innerHTML = '<div class="card"><h2>Configure Mapping: ' + escapeHtml(fileKey) + '</h2><form id="mapping-form"><div class="mapping-grid"><div class="mapping-field"><label>Part Number</label><select id="m-partNumber" required>' + opts + '</select></div><div class="mapping-field"><label>Category</label><select id="m-category" required>' + opts + '</select></div><div class="mapping-field"><label>Manufacturer</label><select id="m-manufacturer" required>' + opts + '</select></div></div><div class="mapping-actions"><button type="button" class="btn btn-secondary" onclick="closeMapping()">Cancel</button><button type="submit" id="save-btn" class="btn btn-success">Save Mapping</button></div></form></div>';
-        c.dataset.fileKey = fileKey;
-        if (data.mapping) {
-          if (data.mapping.partNumber) document.getElementById('m-partNumber').value = data.mapping.partNumber;
-          if (data.mapping.category) document.getElementById('m-category').value = data.mapping.category;
-          if (data.mapping.manufacturer) document.getElementById('m-manufacturer').value = data.mapping.manufacturer;
+    function getBadge(file, prog) {
+      if (prog?.status === 'completed') return '<span class="badge badge-completed">Completed</span>';
+      if (prog?.status === 'processing') return '<span class="badge badge-processing">Processing</span>';
+      if (file.status === 'ready') return '<span class="badge badge-ready">Ready</span>';
+      return '<span class="badge badge-pending">Pending</span>';
+    }
+
+    function renderCard(file, prog) {
+      const date = file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+      const pct = prog?.percentage || 0;
+      const barClass = prog?.status === 'completed' ? 'completed' : prog?.status === 'processing' ? 'processing' : 'pending';
+      const hasMapping = file.mapping?.partNumber;
+      const isComplete = prog?.status === 'completed';
+      const hasMissing = prog?.missingProductsCount > 0;
+      
+      let stats = '';
+      if (prog?.totalRows > 0) {
+        stats = `<div class="stats-row">
+          <div class="stat"><div class="stat-value">${prog.totalRows}</div><div class="stat-label">Total</div></div>
+          <div class="stat"><div class="stat-value text-success">${prog.updated||0}</div><div class="stat-label">Updated</div></div>
+          <div class="stat"><div class="stat-value text-warning">${prog.skipped||0}</div><div class="stat-label">Skipped</div></div>
+          <div class="stat"><div class="stat-value text-danger">${prog.failed||0}</div><div class="stat-label">Failed</div></div>
+        </div>`;
+      }
+
+      let missing = '';
+      if (hasMissing) {
+        missing = `<div class="missing-alert"><span>⚠️ Missing products</span><span>${prog.missingProductsCount}</span></div>`;
+      }
+
+      return `<div class="file-card" data-key="${esc(file.fileKey)}">
+        <div class="file-card-header">
+          <div class="file-card-title">${esc(file.fileKey)}</div>
+          <div class="file-card-meta">${getBadge(file,prog)}<span>${date}</span></div>
+        </div>
+        <div class="file-card-body">
+          <div class="progress-section">
+            <div class="progress-header"><span>Progress</span><span>${prog?.processedRows||0}/${prog?.totalRows||0} (${pct}%)</span></div>
+            <div class="progress-bar-bg"><div class="progress-bar ${barClass}" style="width:${pct}%"></div></div>
+          </div>
+          ${stats}${missing}
+        </div>
+        <div class="file-card-footer">
+          <button class="btn btn-secondary btn-sm" onclick="openMapping('${esc(file.fileKey).replace(/'/g,"\\'")}')">⚙️ Configure</button>
+          ${isComplete && hasMissing ? `<button class="btn btn-purple btn-sm" onclick="createProducts('${esc(file.fileKey).replace(/'/g,"\\'")}')">➕ Create</button>` : ''}
+          ${hasMapping ? `<button class="btn btn-warning btn-sm" onclick="reprocess('${esc(file.fileKey).replace(/'/g,"\\'")}')">🔄 Reprocess</button>` : ''}
+          <button class="btn btn-danger btn-sm" onclick="deleteFile('${esc(file.fileKey).replace(/'/g,"\\'")}')">🗑️</button>
+        </div>
+      </div>`;
+    }
+
+    async function renderFiles(files) {
+      const wrap = document.getElementById('files-wrapper');
+      document.getElementById('files-count').textContent = `${files.length} file(s)`;
+      
+      if (!files.length) {
+        wrap.innerHTML = '<div class="empty-state">No files yet. Upload a CSV to start.</div>';
+        return;
+      }
+
+      Object.values(progressTimers).forEach(clearInterval);
+      progressTimers = {};
+
+      const progs = await Promise.all(files.map(f => fetchProgress(f.fileKey)));
+      
+      wrap.innerHTML = '<div class="files-grid">' + files.map((f,i) => renderCard(f, progs[i])).join('') + '</div>';
+
+      files.forEach((f,i) => {
+        if (f.status === 'ready' && progs[i]?.status !== 'completed') {
+          progressTimers[f.fileKey] = setInterval(async () => {
+            const p = await fetchProgress(f.fileKey);
+            if (p) updateCard(f.fileKey, p);
+            if (p?.status === 'completed') {
+              clearInterval(progressTimers[f.fileKey]);
+              delete progressTimers[f.fileKey];
+              loadFiles();
+            }
+          }, 5000);
         }
-        document.getElementById('mapping-form').onsubmit = saveMapping;
-      } catch (e) { showToast('Failed to load mapping', 'error'); }
+      });
+    }
+
+    function updateCard(key, prog) {
+      const card = document.querySelector(`.file-card[data-key="${CSS.escape(key)}"]`);
+      if (!card) return;
+      const pct = prog?.percentage || 0;
+      const barClass = prog?.status === 'completed' ? 'completed' : prog?.status === 'processing' ? 'processing' : 'pending';
+      const progHeader = card.querySelector('.progress-header span:last-child');
+      const progBar = card.querySelector('.progress-bar');
+      if (progHeader) progHeader.textContent = `${prog?.processedRows||0}/${prog?.totalRows||0} (${pct}%)`;
+      if (progBar) { progBar.style.width = pct + '%'; progBar.className = `progress-bar ${barClass}`; }
+    }
+
+    async function loadFiles() { await renderFiles(await fetchFiles()); }
+
+    async function openMapping(key) {
+      try {
+        const data = await api(`${API.MAPPINGS}/${encodeURIComponent(key)}`);
+        const headers = data.headers || [];
+        const m = data.mapping || {};
+        const opts = h => headers.map(x => `<option value="${esc(x)}"${x===m[h]?' selected':''}>${esc(x)}</option>`).join('');
+        
+        document.getElementById('mapping-container').innerHTML = `
+          <div class="card">
+            <div class="card-header">
+              <div><h2>⚙️ Configure Mapping</h2><p style="color:var(--color-gray-500);font-size:var(--text-sm)">${esc(key)}</p></div>
+              <button class="btn btn-secondary btn-sm" onclick="closeMapping()">✕</button>
+            </div>
+            <form id="mapping-form" data-key="${esc(key)}">
+              <div class="mapping-grid">
+                <div class="form-group"><label class="form-label">Part Number</label><select id="m-partNumber" class="form-select" required><option value="">Select...</option>${opts('partNumber')}</select></div>
+                <div class="form-group"><label class="form-label">Category</label><select id="m-category" class="form-select" required><option value="">Select...</option>${opts('category')}</select></div>
+                <div class="form-group"><label class="form-label">Manufacturer</label><select id="m-manufacturer" class="form-select" required><option value="">Select...</option>${opts('manufacturer')}</select></div>
+              </div>
+              <div style="display:flex;justify-content:flex-end;gap:var(--space-2)">
+                <button type="button" class="btn btn-secondary" onclick="closeMapping()">Cancel</button>
+                <button type="submit" class="btn btn-success" id="save-btn">💾 Save</button>
+              </div>
+            </form>
+          </div>`;
+        
+        document.getElementById('mapping-form').addEventListener('submit', saveMapping);
+      } catch(e) { toast(e.message, 'error'); }
     }
 
     function closeMapping() { document.getElementById('mapping-container').innerHTML = ''; }
 
     async function saveMapping(e) {
       e.preventDefault();
-      var btn = document.getElementById('save-btn');
-      var fileKey = document.getElementById('mapping-container').dataset.fileKey;
-      var payload = { partNumber: document.getElementById('m-partNumber').value, category: document.getElementById('m-category').value, manufacturer: document.getElementById('m-manufacturer').value };
-      if (!payload.partNumber || !payload.category || !payload.manufacturer) { showToast('Please select all fields', 'error'); return; }
+      const form = e.target;
+      const key = form.dataset.key;
+      const btn = document.getElementById('save-btn');
+      const payload = {
+        partNumber: document.getElementById('m-partNumber').value,
+        category: document.getElementById('m-category').value,
+        manufacturer: document.getElementById('m-manufacturer').value
+      };
+      if (!payload.partNumber || !payload.category || !payload.manufacturer) {
+        toast('Select all fields', 'warning'); return;
+      }
       setLoading(btn, true);
       try {
-        var r = await fetch('/api/csv-mappings/' + encodeURIComponent(fileKey), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        if (!r.ok) throw new Error();
-        showToast('Mapping saved!', 'success');
+        await api(`${API.MAPPINGS}/${encodeURIComponent(key)}`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        toast('Mapping saved! Click "Start Processing" to begin.', 'success');
         closeMapping();
-        renderFiles(await fetchFiles());
-      } catch (e) { showToast('Failed to save', 'error'); }
-      setLoading(btn, false);
+        await loadFiles();
+      } catch(e) { toast(e.message,'error'); }
+      finally { setLoading(btn, false); }
     }
 
-    document.getElementById('upload-form').onsubmit = async function(e) {
+    async function reprocess(key) {
+      showModal('Reprocess File', `<p>Reset progress for <strong>${esc(key)}</strong> and queue for reprocessing?</p>`, 'Reprocess', 'btn-warning', async () => {
+        try {
+          await api(`${API.MAPPINGS}/${encodeURIComponent(key)}/reprocess`, {method:'POST'});
+          toast('File queued for reprocessing. Click "Start Processing".', 'success');
+          await loadFiles();
+        } catch(e) { toast(e.message,'error'); }
+      });
+    }
+
+    async function deleteFile(key) {
+      showModal('Delete File', `<p>Remove <strong>${esc(key)}</strong> from registry?</p>`, 'Delete', 'btn-danger', async () => {
+        try {
+          await api(`${API.MAPPINGS}/${encodeURIComponent(key)}`, {method:'DELETE'});
+          toast('File removed', 'success');
+          await loadFiles();
+        } catch(e) { toast(e.message,'error'); }
+      });
+    }
+
+    async function createProducts(key) {
+      try {
+        const data = await api(`/api/missing-products/${encodeURIComponent(key)}`);
+        if (!data.count) { toast('No missing products','warning'); return; }
+        const cats = data.categories || ['unknown'];
+        const catOpts = cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+        showModal('Create Missing Products', `<p>Found ${data.count} missing products. Select category:</p><select id="cat-select" class="form-select" style="margin-top:var(--space-3)">${catOpts}</select>`, 'Create', 'btn-purple', async () => {
+          const cat = document.getElementById('cat-select')?.value;
+          if (!cat) return;
+          toast('Creating products...', 'info');
+          try {
+            await api(`/api/missing-products/${encodeURIComponent(key)}/create`, {
+              method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({categorySlug:cat})
+            });
+            toast('Products created!', 'success');
+            await loadFiles();
+          } catch(e) { toast(e.message,'error'); }
+        });
+      } catch(e) { toast(e.message,'error'); }
+    }
+
+    document.getElementById('upload-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      var btn = document.getElementById('upload-btn');
-      var file = document.getElementById('file').files[0];
-      if (!file) { showToast('Select a file', 'error'); return; }
+      const fileEl = document.getElementById('file');
+      const btn = document.getElementById('upload-btn');
+      if (!fileEl.files.length) { toast('Select a file','warning'); return; }
       setLoading(btn, true);
       try {
-        var fd = new FormData();
-        fd.append('file', file);
-        var folder = document.getElementById('folder').value.trim();
+        const fd = new FormData();
+        fd.append('file', fileEl.files[0]);
+        const folder = document.getElementById('folder').value.trim();
         if (folder) fd.append('folder', folder);
-        var r = await fetch('/api/upload-csv', { method: 'POST', body: fd });
-        if (!r.ok) throw new Error();
-        var data = await r.json();
-        showToast('Uploaded: ' + data.fileKey, 'success');
-        document.getElementById('file').value = '';
+        const r = await fetch(API.UPLOAD, {method:'POST', body:fd});
+        if (!r.ok) throw new Error((await r.json().catch(()=>({}))).error || 'Upload failed');
+        const data = await r.json();
+        toast(`Uploaded: ${data.fileKey}`, 'success');
+        fileEl.value = '';
         document.getElementById('folder').value = '';
-        renderFiles(await fetchFiles());
-      } catch (e) { showToast('Upload failed', 'error'); }
-      setLoading(btn, false);
-    };
+        await loadFiles();
+      } catch(e) { toast(e.message,'error'); }
+      finally { setLoading(btn, false); }
+    });
 
-    document.getElementById('refresh-btn').onclick = async function() {
-      setLoading(this, true);
-      renderFiles(await fetchFiles());
-      setLoading(this, false);
-    };
+    document.getElementById('refresh-btn').addEventListener('click', async (e) => {
+      setLoading(e.target, true);
+      await loadFiles();
+      toast('Refreshed', 'info');
+      setLoading(e.target, false);
+    });
 
-    fetchFiles().then(renderFiles);
+    document.getElementById('start-processing-btn').addEventListener('click', async (e) => {
+      setLoading(e.target, true);
+      try {
+        await api('/api/trigger-processing', {method:'POST'});
+        toast('Processing started! Watch progress below.', 'success');
+        setTimeout(loadFiles, 3000);
+      } catch(err) { toast(err.message,'error'); }
+      finally { setLoading(e.target, false); }
+    });
+
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMapping(); closeModal(); } });
+    document.getElementById('confirm-modal').addEventListener('click', (e) => { if (e.target.id === 'confirm-modal') closeModal(); });
+
+    document.addEventListener('DOMContentLoaded', loadFiles);
   </script>
 </body>
 </html>
