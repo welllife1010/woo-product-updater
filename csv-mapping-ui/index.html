@@ -386,7 +386,7 @@
         if (timestampMatch) { return `<div class="${lineClass}"><span class="timestamp">[${timestampMatch[1]}]</span>${escapeHtml(log.replace(timestampMatch[0], ''))}</div>`; }
         return `<div class="${lineClass}">${escapeHtml(log)}</div>`;
       }).join('');
-      container.scrollTop = container.scrollHeight;
+      if (container.scrollHeight - container.scrollTop - container.clientHeight < 50) { container.scrollTop = container.scrollHeight; }
     }
     function toggleLogPause() {
       logPaused = !logPaused;

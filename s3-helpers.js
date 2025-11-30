@@ -81,6 +81,7 @@ const { saveCheckpoint } = require("./checkpoint");
 const {
   getReadyCsvFiles,
   getMappingForFile,
+  markFileAsCompleted,  // NEW: Mark files as completed to stop repeated processing
 } = require("./csv-mapping-store");
 
 // =============================================================================
@@ -280,20 +281,24 @@ const getTotalRowsFromS3 = async (bucketName, key) => {
     const data = await s3Client.send(new GetObjectCommand(params));
     const bodyContent = await data.Body.transformToString();
 
-    // Count newlines to get line count, subtract for header
-    const lineCount = bodyContent.split("\n").length;
+    // FIX: Filter out empty lines to handle trailing newlines correctly
+    // Without this, a file with 23 data rows ending with \n would count as 24
+    const lines = bodyContent.split("\n").filter(line => line.trim() !== "");
+    const lineCount = lines.length;
     
-    // Account for header row and any trailing newlines
-    // If CSV_HEADER_ROW is 10, we have 9 metadata rows + 1 header row = 10 rows to skip
+    // Account for header row(s)
+    // If CSV_HEADER_ROW is 1, we skip 1 line (the header)
+    // If CSV_HEADER_ROW is 10, we skip 10 lines (9 metadata + 1 header)
     const dataRows = Math.max(0, lineCount - CSV_HEADER_ROW);
 
-    logInfoToFile(`CSV ${key}: ${lineCount} total lines, ${dataRows} data rows`);
+    logInfoToFile(`CSV ${key}: ${lineCount} non-empty lines, ${dataRows} data rows`);
     return dataRows;
   } catch (error) {
     logErrorToFile(`Error counting rows in ${key}: ${error.message}`);
     return null;
   }
 };
+
 
 // =============================================================================
 // JOB DUPLICATE DETECTION
@@ -480,6 +485,10 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
     const fileProcessed = isFileFullyProcessed(key);
     if (fileProcessed) {
       logInfoToFile(`✅ Skipping ${key}: Already fully processed.`);
+      
+      // NEW: Mark as completed to stop repeated checks
+      markFileAsCompleted(key);
+      
       return;
     }
   } catch (error) {
@@ -543,6 +552,10 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
   // Check if we've already processed everything
   if (resumeFromRow >= totalRows) {
     logInfoToFile(`✅ All rows in ${key} already processed. Nothing to enqueue.`);
+    
+    // NEW: Mark as completed to stop repeated checks
+    markFileAsCompleted(key);
+    
     return;
   }
 

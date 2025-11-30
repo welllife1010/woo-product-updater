@@ -81,6 +81,29 @@ function loadMappings() {
   }
 }
 
+function markFileAsCompleted(fileKey) {
+  const mappingsPath = path.join(__dirname, "csv-mappings.json");
+  if (!fs.existsSync(mappingsPath)) return;
+  
+  try {
+    const raw = fs.readFileSync(mappingsPath, "utf-8");
+    let data = JSON.parse(raw);
+    
+    let files = Array.isArray(data) ? data : (data.files || []);
+    const file = files.find(f => f.fileKey === fileKey);
+    
+    if (file) {
+      file.status = "completed";
+      file.completedAt = new Date().toISOString();
+      fs.writeFileSync(mappingsPath, JSON.stringify(data, null, 2));
+    }
+  } catch (error) {
+    console.error(`Error marking file completed: ${error.message}`);
+  }
+}
+
+// Add to module.exports
+
 /**
  * getReadyCsvFiles()
  * @returns {Array<{fileKey:string, headers:string[], mapping:Object, uploadedAt:string}>}
@@ -104,4 +127,5 @@ module.exports = {
   loadMappings,
   getReadyCsvFiles,
   getMappingForFile,
+  markFileAsCompleted,
 };
