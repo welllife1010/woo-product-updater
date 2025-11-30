@@ -6,8 +6,11 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const multer = require("multer");
+
+
+// S3 Client setup (adjust region as needed)
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const s3Client = new S3Client({ region: process.env.AWS_REGION || process.env.AWS_REGION_NAME || "us-west-1" });
 
 const app = express();
 const PORT = process.env.CSV_MAPPING_PORT || 4000;
@@ -24,9 +27,6 @@ const S3_BUCKET_NAME = (executionMode === "development" || executionMode === "te
   : process.env.S3_BUCKET_NAME;
 
 console.log("[csv-mapping-ui] Using S3 bucket:", S3_BUCKET_NAME, "| Mode:", executionMode);
-
-const AWS_REGION = process.env.AWS_REGION || process.env.AWS_REGION_NAME || "us-west-1";
-const s3Client = new S3Client({ region: AWS_REGION });
 
 // Multer for file uploads
 const uploadDir = path.join(__dirname, "tmp-uploads");
@@ -79,6 +79,22 @@ function registerNewCsv(fileKey, headers) {
 app.get("/api/csv-mappings", (req, res) => {
   const mappings = readMappings();
   res.json(mappings.files);
+});
+
+// GET /api/csv-mappings - List all registered CSV files
+app.get("/api/csv-mappings", (req, res) => {
+  try {
+    const mappingsFile = path.join(__dirname, "csv-mappings.json");
+    if (!fs.existsSync(mappingsFile)) {
+      return res.json([]);
+    }
+    const mappings = JSON.parse(fs.readFileSync(mappingsFile, "utf8"));
+    const files = Object.values(mappings);
+    res.json(files);
+  } catch (err) {
+    console.error("[csv-mappings] Error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET /api/csv-mappings/:fileKey - Get single file details
