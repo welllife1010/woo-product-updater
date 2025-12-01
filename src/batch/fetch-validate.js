@@ -129,9 +129,12 @@ async function fetchProductData(
     recordMissingProduct(fileKey, item, leafCategorySlug);
 
     // 2e. Log and return "no data".
-    logErrorToFile(
-      `"processBatch()" - Missing productId for part_number=${item.part_number}, marking as failed.`
+    // Product not found in WooCommerce - this is expected for new products
+    // They are saved to missing-products folder and counted as "skipped" (not failed)
+    logInfoToFile(
+      `"processBatch()" - Product not found: part_number=${item.part_number}, saved to missing products.`
     );
+    
     return { productId: null, currentData: null };
   }
 

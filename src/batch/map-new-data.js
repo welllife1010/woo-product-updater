@@ -34,7 +34,12 @@ const FIELD_ALIASES = {
   "reach_compliance": "reach_status",
   "hts_code": "htsus_code",
   "eccn": "export_control_class_number",
-  "moisture_sensitivity_level": "moisture_sensitivity_level"
+  "moisture_sensitivity_level": "moisture_sensitivity_level",
+
+  // URL field variants (after asterisk removal)
+  "datasheet_url": "datasheet",
+  "image_attachment_url": "image_url",
+  "image_url": "image_url"
 };
 
 // Apply aliases before mapping
@@ -55,7 +60,7 @@ const applyAliases = (normalizedRow) => {
 const normalizeCsvHeaders = (item) => {
   const out = {};
   Object.keys(item).forEach((key) => {
-    const normalizedKey = key.trim().toLowerCase().replace(/\s+/g, "_");
+    const normalizedKey = key.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
     out[normalizedKey] = item[key];
   });
   return out;

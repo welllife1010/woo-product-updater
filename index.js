@@ -32,7 +32,7 @@ const executionMode = process.env.EXECUTION_MODE || "production";
 logInfoToFile(`Running in ${executionMode} mode`);
 
 const getS3BucketName = (executionMode) => {
-  return executionMode === "development"
+  return executionMode === "development" || executionMode === "test"
     ? process.env.S3_BUCKET_NAME_TEST
     : process.env.S3_BUCKET_NAME;
 };
@@ -173,6 +173,12 @@ const server = app.listen(PORT, () => {
 const checkAllFilesProcessed = async () => {
   try {
     const fileKeys = await appRedis.keys("total-rows:*");
+
+    // FIX: No files = keep waiting, not "all done"
+    if (fileKeys.length === 0) {
+      return false;  // Nothing to process, but don't trigger shutdown
+    }
+
     for (const key of fileKeys) {
       // BUG FIX: Use .replace() instead of .split()[1] to handle colons in fileKey
       // This correctly handles fileKeys like "vendor:uploads/products.csv"
@@ -206,24 +212,25 @@ const checkAllFilesProcessed = async () => {
   }
 };
 
+// --- DISABLED: Auto-shutdown causes restart loops with PM2 ---
 // Shutdown check interval for index.js
 // - Clears itself so it won’t run again.
 // - Logs a message.
 // - Closes the Express server.
 // - Disconnects the Redis client.
 // - Finally calls process.exit(0) to fully terminate the Node process.
-const shutdownCheckInterval = setInterval(async () => {
-  const allProcessed = await checkAllFilesProcessed();
-  if (allProcessed) {
-    clearInterval(shutdownCheckInterval);
-    console.log("All processing complete in index.js. Shutting down...");
-    // Close the Express server
-    server.close(() => {
-      // Disconnect from Redis
-      appRedis.quit().then(() => process.exit(0));
-    });
-  }
-}, 5000); // Check every 5 seconds
+// const shutdownCheckInterval = setInterval(async () => {
+//   const allProcessed = await checkAllFilesProcessed();
+//   if (allProcessed) {
+//     clearInterval(shutdownCheckInterval);
+//     console.log("All processing complete in index.js. Shutting down...");
+//     // Close the Express server
+//     server.close(() => {
+//       // Disconnect from Redis
+//       appRedis.quit().then(() => process.exit(0));
+//     });
+//   }
+// }, 60000); // Check every 60 seconds
 
 // -------------------- Global error hooks --------------------
 process.on("uncaughtException", (error) =>

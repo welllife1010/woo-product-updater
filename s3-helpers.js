@@ -176,12 +176,14 @@ function normalizeHeaderKey(rawKey) {
  * @param {string} mode - "production", "development", or "test"
  * @returns {string} - The S3 bucket name to use
  */
-function getS3BucketName(mode) {
-  if (mode === "test") {
-    return process.env.S3_BUCKET_NAME_TEST;
-  }
-  return process.env.S3_BUCKET_NAME;
-}
+// function getS3BucketName(mode) {
+//   console.log(`!!! [s3-helpers] getS3BucketName() called with mode: ${mode}`);
+//   logInfoToFile(`!!! getS3BucketName() called with mode: ${mode}`);
+//   if (mode === "test") {
+//     return process.env.S3_BUCKET_NAME_TEST;
+//   }
+//   return process.env.S3_BUCKET_NAME;
+// }
 
 // =============================================================================
 // REDIS TRACKING INITIALIZATION
@@ -281,18 +283,48 @@ const getTotalRowsFromS3 = async (bucketName, key) => {
     const data = await s3Client.send(new GetObjectCommand(params));
     const bodyContent = await data.Body.transformToString();
 
-    // FIX: Filter out empty lines to handle trailing newlines correctly
-    // Without this, a file with 23 data rows ending with \n would count as 24
-    const lines = bodyContent.split("\n").filter(line => line.trim() !== "");
-    const lineCount = lines.length;
+    // =========================================================================
+    // FIX: Use csv-parser for accurate row counting
+    // =========================================================================
+    // Simple line counting fails for CSVs with multiline quoted fields.
+    // Example: A description with bullet points spanning 5 lines is ONE row.
+    // csv-parser correctly handles this.
+    // =========================================================================
     
-    // Account for header row(s)
-    // If CSV_HEADER_ROW is 1, we skip 1 line (the header)
-    // If CSV_HEADER_ROW is 10, we skip 10 lines (9 metadata + 1 header)
-    const dataRows = Math.max(0, lineCount - CSV_HEADER_ROW);
+    return new Promise((resolve, reject) => {
+      let rowCount = 0;
+      
+      const stream = Readable.from(bodyContent);
+      
+      stream
+        .pipe(csvParser({ skipLines: CSV_SKIP_LINES }))
+        .on("data", () => {
+          rowCount++;
+        })
+        .on("end", () => {
+          logInfoToFile(`CSV ${key}: ${rowCount} data rows (csv-parser)`);
+          resolve(rowCount);
+        })
+        .on("error", (err) => {
+          logErrorToFile(`CSV parse error for ${key}: ${err.message}`);
+          
+          // Fallback to line counting if csv-parser fails
+          // Filter out: empty lines, BOM-only, whitespace-only, carriage returns
+          const lines = bodyContent.split("\n").filter(line => {
+            const trimmed = line.trim();
+            return trimmed !== "" && 
+                   trimmed !== "\ufeff" && 
+                   !/^[\s\r\n]*$/.test(trimmed);
+          });
 
-    logInfoToFile(`CSV ${key}: ${lineCount} non-empty lines, ${dataRows} data rows`);
-    return dataRows;
+          // Account for header row(s)
+          // If CSV_HEADER_ROW is 1, we skip 1 line (the header)
+          // If CSV_HEADER_ROW is 10, we skip 10 lines (9 metadata + 1 header)
+          const dataRows = Math.max(0, lines.length - CSV_HEADER_ROW);
+          logInfoToFile(`CSV ${key}: ${dataRows} data rows (fallback line count)`);
+          resolve(dataRows);
+        });
+    });
   } catch (error) {
     logErrorToFile(`Error counting rows in ${key}: ${error.message}`);
     return null;

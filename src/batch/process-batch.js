@@ -70,6 +70,7 @@ const { resolveCategory } = require("../../category-map");
 
 // Category hierarchy creation in WooCommerce
 const { ensureCategoryHierarchy } = require("../../category-woo");
+const { log } = require("util");
 
 // =============================================================================
 // CONFIGURATION
@@ -401,6 +402,11 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       // =====================================================================
       if (resolvedCategory) {
         try {
+          
+          logInfoToFile(
+            `processBatch() - Applying resolved category to ${item.part_number}`
+          );
+
           const hierarchy = await ensureCategoryHierarchy(resolvedCategory);
 
           if (hierarchy && Array.isArray(hierarchy.ids) && hierarchy.ids.length) {

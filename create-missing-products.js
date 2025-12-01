@@ -573,7 +573,7 @@ const processMissingProducts = async (categorySlug, fileKey) => {
           logInfoToFile(
             `[create-missing-products] (TEST MODE) Would create product part_number=${partNumber} with categories: [${categoryIds.join(", ")}]`
           );
-          continue;
+          // continue;
         }
 
         const response = await wooApi.post("products", newProduct);

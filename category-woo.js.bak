@@ -106,11 +106,7 @@ async function getOrCreateCategory(name, parentId = 0) {
  *   } | null
  */
 async function ensureCategoryHierarchy(resolvedCategory) {
-  const { logInfoToFile } = require("./logger");
-  logInfoToFile(`[DEBUG] ensureCategoryHierarchy called with: ${JSON.stringify(resolvedCategory)}`);
-  
   if (!resolvedCategory || !resolvedCategory.main) {
-    logInfoToFile(`[DEBUG] ensureCategoryHierarchy returning null - no main category`);
     // Nothing we can do
     return null;
   }
@@ -136,7 +132,6 @@ async function ensureCategoryHierarchy(resolvedCategory) {
   if (subCat) ids.push(subCat.id);
   if (sub2Cat) ids.push(sub2Cat.id);
 
-  logInfoToFile(`[DEBUG] ensureCategoryHierarchy returning ids: ${JSON.stringify(ids)}`);
   return {
     ids,
     mainId: mainCat.id,

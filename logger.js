@@ -7,6 +7,9 @@ const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 const { appRedis } = require('./queue');
 
+// Track files already logged as complete (prevents spam)
+const completedFilesLogged = new Set();
+
 // Extend dayjs with UTC and timezone plugins
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -73,7 +76,9 @@ const logProgressToFile = async () => {
     let allFilesComplete = true; // <-- Track if everything is done
 
     for (const key of fileKeys) {
-      const fileKey = key.split(":")[1];
+      // FIX: Robust fileKey extraction (handles colons in filename)
+      const fileKey = key.replace(/^total-rows:/, "");
+
       const totalRows = parseInt(await appRedis.get(`total-rows:${fileKey}`) || 0, 10);
       const updated = parseInt(await appRedis.get(`updated-products:${fileKey}`) || 0, 10);
       const skipped = parseInt(await appRedis.get(`skipped-products:${fileKey}`) || 0, 10);
@@ -81,26 +86,38 @@ const logProgressToFile = async () => {
 
       const completed = updated + skipped + failed;
       const progress = totalRows > 0 ? Math.round((completed / totalRows) * 100) : 0;
+      const isComplete = completed >= totalRows && totalRows > 0;
+
+      // FIX: Skip spam for completed files - log completion ONCE only
+      if (isComplete) {
+        if (!completedFilesLogged.has(fileKey)) {
+          progressLogs += `[${getPSTTimestamp()}] ✅ File COMPLETED: ${fileKey}\n`;
+          progressLogs += `   Final stats - Updated: ${updated}, Skipped: ${skipped}, Failed: ${failed}, Total: ${totalRows}\n\n`;
+          completedFilesLogged.add(fileKey);
+        }
+        // Skip further logging for this file
+        continue;
+      }
+
+      // File is still processing
+      allFilesComplete = false;
 
       // Build log output
-      progressLogs += `[${getPSTTimestamp()}] File: ${fileKey}\n`;
-      if ( completed === totalRows ) {
-        progressLogs += `Completed: ${completed}, Total: ${totalRows} (100% completed)\n\n Updated: ${updated}, Skipped: ${skipped}, Failed: ${failed}\n\n ----------------------\n\n`;
-      } else {
-        // If even one file is incomplete, keep printing progress
-        allFilesComplete = false;
-        progressLogs += `Updated: ${updated}, Skipped: ${skipped}, Failed: ${failed}, Total: ${totalRows} (${progress}% completed)\n\n ----------------------\n\n`;
-      }
+      progressLogs += `[${getPSTTimestamp()}] 📊 File ${fileKey}: ${completed}/${totalRows} rows processed (${progress}%)\n`;
+      progressLogs += `   Updated: ${updated}, Skipped: ${skipped}, Failed: ${failed}\n\n`;
     }
 
-    // Actually write the logs
-    writeProgressToFile(progressLogs);
+    // Only write if there's something meaningful to log
+    if (progressLogs.trim()) {
+      writeProgressToFile(progressLogs);
+    }
 
     // Return true only if every file is finished
     return allFilesComplete;
     
   } catch (error) {
     logErrorToFile(`Error logging progress: ${error.message}`);
+    return false;
   }
 };
 
