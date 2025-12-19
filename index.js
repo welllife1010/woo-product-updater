@@ -4,11 +4,8 @@ dotenv.config();
 const express = require("express");
 const { performance } = require("perf_hooks"); // Track time for the whole run
 
-const { appRedis } = require("./queue");
-const { batchQueue } = require("./queue");
-const {
-  processReadyCsvFilesFromMappings,
-} = require("./s3-helpers");
+const { appRedis, batchQueue } = require("./queue");
+const { processReadyCsvFilesFromMappings } = require("./s3-helpers");
 const {
   logger,
   logErrorToFile,

@@ -60,12 +60,12 @@ const { logErrorToFile, logInfoToFile } = require("./logger");
 const { appRedis } = require("./queue");
 
 // Main batch processing function
-const { processBatch } = require("./src/batch");
+const { processBatch } = require("./src/batch/process-batch");
 
 // Checkpoint management (with atomic save for race condition fix)
 const { 
   getLastProcessedRow,        // Sync version (for backward compatibility)
-  saveCheckpointAtomic,       // ⭐ NEW: Atomic save to prevent race conditions
+  saveCheckpointAtomic,       // Atomic save to prevent race conditions
 } = require("./checkpoint");
 
 // =============================================================================
