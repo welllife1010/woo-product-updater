@@ -21,6 +21,26 @@ The system uses:
 
 ## High-Level Architecture
 
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  index.js       │     │  worker.js      │     │ csv-mapping-    │
+│  (Main App)     │────▶│  (Worker)       │     │ server.js (UI)  │
+│  Port 3000      │     │                 │     │  Port 4000      │
+│                 │     │                 │     │                 │
+│ - Reads CSV     │     │ - Processes     │     │ - Admin UI      │
+│ - Creates jobs  │     │   batch jobs    │     │ - Upload CSVs   │
+│ - Enqueues to   │     │ - Updates Woo   │     │ - Map columns   │
+│   Redis         │     │ - Tracks        │     │ - Monitor       │
+└─────────────────┘     │   progress      │     │   progress      │
+        │               └─────────────────┘     └─────────────────┘
+        │                       │                        │
+        └───────────────────────┼────────────────────────┘
+                                ▼
+                   ┌─────────────────────┐
+                   │       Redis         │
+                   │   (Job Queue +      │
+                   │    Progress Data)   │
+                   └─────────────────────┘
+
 ### Data Sources
 
 - **CSV files** from vendors (usually uploaded to S3)
