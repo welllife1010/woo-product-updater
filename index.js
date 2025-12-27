@@ -1,8 +1,18 @@
+/**
+ * index.js
+ * Main application entry point - Job creation and queue management
+ * 
+ * ENHANCEMENTS:
+ * - Bull Board enabled for ALL environments (including production)
+ * - Basic auth protection for Bull Board in production
+ * - Environment-aware logging
+ */
+
 const dotenv = require("dotenv");
 dotenv.config();
 
 const express = require("express");
-const { performance } = require("perf_hooks"); // Track time for the whole run
+const { performance } = require("perf_hooks");
 
 const { appRedis, batchQueue } = require("./queue");
 const { processReadyCsvFilesFromMappings } = require("./s3-helpers");
@@ -12,6 +22,7 @@ const {
   logUpdatesToFile,
   logInfoToFile,
   logProgressToFile,
+  ENV_LABEL,
 } = require("./logger");
 const { createUniqueJobId } = require("./utils");
 const { addBatchJob } = require("./job-manager");
@@ -20,40 +31,118 @@ const { BullMQAdapter } = require("@bull-board/api/bullMQAdapter");
 const { createBullBoard } = require("@bull-board/api");
 const { ExpressAdapter } = require("@bull-board/express");
 
-// -------------------- Express setup --------------------
+// =============================================================================
+// EXPRESS SETUP
+// =============================================================================
+
 const app = express();
-app.use(express.json()); // Needed to parse JSON request bodies
+app.use(express.json());
 
-// Determine execution mode and bucket selection
+// =============================================================================
+// ENVIRONMENT CONFIGURATION
+// =============================================================================
+
 const executionMode = process.env.EXECUTION_MODE || "production";
-logInfoToFile(`Running in ${executionMode} mode`);
+logInfoToFile(`🚀 Starting application in ${executionMode} mode`);
 
-const getS3BucketName = (executionMode) => {
-  return executionMode === "development" || executionMode === "test"
+/**
+ * Get S3 bucket name based on execution mode
+ */
+const getS3BucketName = (mode) => {
+  return mode === "development" || mode === "test"
     ? process.env.S3_BUCKET_NAME_TEST
     : process.env.S3_BUCKET_NAME;
 };
 
-// -------------------- Bull Board (dev only) --------------------
-if (executionMode === "development" || executionMode === "test") {
-  const serverAdapter = new ExpressAdapter();
-  serverAdapter.setBasePath("/admin/queues");
-  app.use("/admin/queues", serverAdapter.getRouter());
+// =============================================================================
+// BASIC AUTH MIDDLEWARE FOR PRODUCTION
+// =============================================================================
 
-  createBullBoard({
-    queues: [new BullMQAdapter(batchQueue)],
-    serverAdapter: serverAdapter,
-  });
+/**
+ * Basic authentication middleware for Bull Board in production
+ * Uses environment variables for credentials
+ */
+const basicAuthMiddleware = (req, res, next) => {
+  // Skip auth for non-production environments
+  if (executionMode !== "production") {
+    return next();
+  }
+  
+  // Get credentials from environment or use defaults
+  const ADMIN_USER = process.env.BULL_BOARD_USER || "admin";
+  const ADMIN_PASS = process.env.BULL_BOARD_PASS || "woo-update-2024";
+  
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="Bull Board Admin"');
+    return res.status(401).send("Authentication required");
+  }
+  
+  const [type, credentials] = authHeader.split(" ");
+  
+  if (type !== "Basic" || !credentials) {
+    res.setHeader("WWW-Authenticate", 'Basic realm="Bull Board Admin"');
+    return res.status(401).send("Invalid authentication");
+  }
+  
+  const decoded = Buffer.from(credentials, "base64").toString("utf-8");
+  const [user, pass] = decoded.split(":");
+  
+  if (user === ADMIN_USER && pass === ADMIN_PASS) {
+    return next();
+  }
+  
+  res.setHeader("WWW-Authenticate", 'Basic realm="Bull Board Admin"');
+  return res.status(401).send("Invalid credentials");
+};
 
-  logInfoToFile("✅ Bull Board initialized and batchQueue registered (development only).");
+// =============================================================================
+// BULL BOARD SETUP (ALL ENVIRONMENTS)
+// =============================================================================
+
+const serverAdapter = new ExpressAdapter();
+serverAdapter.setBasePath("/admin/queues");
+
+// Apply basic auth for production, open access for dev/staging
+app.use("/admin/queues", basicAuthMiddleware, serverAdapter.getRouter());
+
+createBullBoard({
+  queues: [new BullMQAdapter(batchQueue)],
+  serverAdapter: serverAdapter,
+});
+
+if (executionMode === "production") {
+  logInfoToFile("✅ Bull Board initialized with basic auth protection");
+} else {
+  logInfoToFile("✅ Bull Board initialized (open access for dev/staging)");
 }
 
-// -------------------- Timing & error handling --------------------
+// =============================================================================
+// ENVIRONMENT INFO ENDPOINT
+// =============================================================================
+
+/**
+ * GET /api/environment
+ * Returns current environment information for the UI
+ */
+app.get("/api/environment", (req, res) => {
+  res.json({
+    mode: executionMode,
+    label: ENV_LABEL,
+    bucket: getS3BucketName(executionMode),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// =============================================================================
+// TIMING & ERROR HANDLING
+// =============================================================================
+
 const startTime = performance.now();
 
 /**
- * Unified error handler that logs how long the process ran
- * before failing and then exits the Node process.
+ * Unified error handler that logs duration before failing
  */
 const handleProcessError = (error, type = "Error") => {
   const duration = ((performance.now() - startTime) / 1000).toFixed(2);
@@ -61,7 +150,13 @@ const handleProcessError = (error, type = "Error") => {
   process.exit(1);
 };
 
-// -------------------- Main process: enqueue jobs for READY CSVs --------------------
+// =============================================================================
+// MAIN PROCESS
+// =============================================================================
+
+/**
+ * Main process: Read CSV mappings and enqueue jobs
+ */
 const mainProcess = async () => {
   try {
     const s3BucketName = getS3BucketName(executionMode);
@@ -71,168 +166,53 @@ const mainProcess = async () => {
       return;
     }
 
-    logger.info(`Starting process for S3 bucket: ${s3BucketName}`);
+    logInfoToFile(`📦 Using S3 bucket: ${s3BucketName}`);
 
-    // ✅ NEW: Use the mapping-based flow
-    // This will:
-    //  - Read csv-mappings.json
-    //  - Find files with status: "ready"
-    //  - For each fileKey, call readCSVAndEnqueueJobs() with the correct mapping
-    await processReadyCsvFilesFromMappings(s3BucketName, 20);
+    const batchSize = parseInt(process.env.BATCH_SIZE) || 20;
+    logInfoToFile(`📊 Batch size: ${batchSize}`);
 
-    // ✅ Log completion time
-    const endTime = performance.now();
-    const duration = ((endTime - startTime) / 1000).toFixed(2);
-    logUpdatesToFile(
-      `"processReadyCsvFilesFromMappings" function completed in ${duration} seconds.`
-    );
+    // Process CSV files that are marked as "ready"
+    await processReadyCsvFilesFromMappings(s3BucketName, batchSize);
+
+    logInfoToFile("✅ Job enqueuing complete. Workers will process the queue.");
+    
   } catch (error) {
-    logErrorToFile(`Unhandled error in mainProcess: ${error.message}`);
-    handleProcessError(error, "Unhandled error in mainProcess");
+    handleProcessError(error, "Main process error");
   }
 };
 
-// ✅ Start the main process
-mainProcess().catch((error) =>
-  handleProcessError(error, "Critical error in main")
-);
+// =============================================================================
+// GRACEFUL SHUTDOWN
+// =============================================================================
 
-// -------------------- Periodic progress logging --------------------
-const progressInterval = setInterval(async () => {
+const gracefulShutdown = async (signal) => {
+  logInfoToFile(`${signal} received. Gracefully shutting down...`);
+  
   try {
-    const allComplete = await logProgressToFile();
-
-    // If we've confirmed that all files are 100% done,
-    // stop the interval from running again.
-    if (allComplete) {
-      console.log(
-        "All files are fully processed. Stopping further progress logs."
-      );
-      clearInterval(progressInterval);
-    }
+    await appRedis.quit();
+    logInfoToFile("Redis connection closed.");
   } catch (error) {
-    console.error(
-      `Error during periodic progress logging: ${error.message}`
-    );
+    logErrorToFile(`Error during shutdown: ${error.message}`);
   }
-}, 1 * 60 * 1000); // 1 minute
+  
+  process.exit(0);
+};
 
-// -------------------- Manual API trigger for batch job testing --------------------
-app.post("/api/start-batch", async (req, res) => {
-  try {
-    const batchData = req.body.batchData; // Assuming batch data is passed in the request body
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("uncaughtException", (error) => handleProcessError(error, "Uncaught Exception"));
+process.on("unhandledRejection", (error) => handleProcessError(error, "Unhandled Rejection"));
 
-    // ✅ Generate a unique job ID for this batch job
-    const jobId = createUniqueJobId();
+// =============================================================================
+// START SERVER
+// =============================================================================
 
-    // ✅ Use the centralized function to add the batch job
-    const job = await addBatchJob({ batch: batchData }, jobId);
-
-    logger.info(`Enqueued batch job with ID: ${job.id}`);
-    res.json({ jobId: job.id });
-  } catch (error) {
-    logErrorToFile(`Failed to enqueue batch: ${error.message}`, error);
-    res.status(500).json({ error: "Failed to enqueue batch" });
-  }
-});
-
-// -------------------- Start Express server --------------------
 const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  if (executionMode === "development" || executionMode === "test") {
-    console.log(
-      "Bull Dashboard is available at http://localhost:3000/admin/queues"
-    );
-  }
+
+app.listen(PORT, () => {
+  logInfoToFile(`🌐 Express server running on port ${PORT}`);
+  logInfoToFile(`📊 Bull Board: http://localhost:${PORT}/admin/queues`);
+  
+  // Run main process after server starts
+  mainProcess();
 });
-
-// -------------------- Processing-complete check & shutdown --------------------
-/**
- * Check if all files have been fully processed.
- * 
- * BUG FIX (2025): Fragile fileKey parsing
- * 
- * PROBLEM:
- * The original code used `key.split(":")[1]` to extract the fileKey from
- * Redis keys like "total-rows:products.csv". This breaks when the fileKey
- * contains a colon, e.g., "total-rows:vendor:uploads/products.csv"
- * would incorrectly parse to just "vendor".
- * 
- * THE FIX:
- * Use a more robust parsing method that handles colons in fileKeys:
- *   - Split only on the FIRST colon
- *   - Join the remaining parts back together
- *   - Or better: use .replace() to remove the prefix
- * 
- * @returns {Promise<boolean>} True if all files are complete, false otherwise
- */
-const checkAllFilesProcessed = async () => {
-  try {
-    const fileKeys = await appRedis.keys("total-rows:*");
-
-    // FIX: No files = keep waiting, not "all done"
-    if (fileKeys.length === 0) {
-      return false;  // Nothing to process, but don't trigger shutdown
-    }
-
-    for (const key of fileKeys) {
-      // BUG FIX: Use .replace() instead of .split()[1] to handle colons in fileKey
-      // This correctly handles fileKeys like "vendor:uploads/products.csv"
-      const fileKey = key.replace(/^total-rows:/, "");
-      
-      const totalRows = parseInt(
-        await appRedis.get(`total-rows:${fileKey}`) || "0",
-        10
-      );
-      const updated = parseInt(
-        await appRedis.get(`updated-products:${fileKey}`) || "0",
-        10
-      );
-      const skipped = parseInt(
-        await appRedis.get(`skipped-products:${fileKey}`) || "0",
-        10
-      );
-      const failed = parseInt(
-        await appRedis.get(`failed-products:${fileKey}`) || "0",
-        10
-      );
-
-      if (updated + skipped + failed < totalRows) {
-        return false; // At least one file is still in progress
-      }
-    }
-    return true; // All files are complete
-  } catch (error) {
-    console.error("Error checking processing status:", error.message);
-    return false;
-  }
-};
-
-// --- DISABLED: Auto-shutdown causes restart loops with PM2 ---
-// Shutdown check interval for index.js
-// - Clears itself so it won’t run again.
-// - Logs a message.
-// - Closes the Express server.
-// - Disconnects the Redis client.
-// - Finally calls process.exit(0) to fully terminate the Node process.
-// const shutdownCheckInterval = setInterval(async () => {
-//   const allProcessed = await checkAllFilesProcessed();
-//   if (allProcessed) {
-//     clearInterval(shutdownCheckInterval);
-//     console.log("All processing complete in index.js. Shutting down...");
-//     // Close the Express server
-//     server.close(() => {
-//       // Disconnect from Redis
-//       appRedis.quit().then(() => process.exit(0));
-//     });
-//   }
-// }, 60000); // Check every 60 seconds
-
-// -------------------- Global error hooks --------------------
-process.on("uncaughtException", (error) =>
-  handleProcessError(error, "Uncaught exception")
-);
-process.on("unhandledRejection", (reason) =>
-  handleProcessError(reason, "Unhandled rejection")
-);

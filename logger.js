@@ -1,3 +1,15 @@
+/**
+ * logger.js
+ * Enhanced logging system with environment-aware prefixes
+ * 
+ * FEATURES:
+ * - Environment prefix on every log line: [PROD], [STAGING], [DEV]
+ * - Log rotation at 5MB with archived file naming
+ * - PST timestamps for consistency
+ * - Redis-based progress tracking
+ * - Prevents duplicate completion logging
+ */
+
 const fs = require("fs");
 const path = require("path");
 const pino = require("pino");
@@ -14,69 +26,201 @@ const completedFilesLogged = new Set();
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-// File paths
+// =============================================================================
+// ENVIRONMENT CONFIGURATION
+// =============================================================================
+
+/**
+ * Get the current execution mode and derive environment label
+ */
+const executionMode = process.env.EXECUTION_MODE || "production";
+
+/**
+ * Environment label for log prefixes
+ * Maps EXECUTION_MODE to human-readable labels
+ */
+const getEnvLabel = () => {
+  switch (executionMode) {
+    case "production":
+      return "PROD";
+    case "test":
+      return "STAGING";
+    case "development":
+      return "DEV";
+    default:
+      return executionMode.toUpperCase();
+  }
+};
+
+const ENV_LABEL = getEnvLabel();
+
+// =============================================================================
+// FILE PATHS
+// =============================================================================
+
 const progressFilePath = path.join(__dirname, "output-files", "update-progress.txt");
 const errorFilePath = path.join(__dirname, "output-files", "error-log.txt");
 const infoFilePath = path.join(__dirname, "output-files", "info-log.txt");
 const updatesFilePath = path.join(__dirname, "output-files", "updates-log.txt");
 
+// =============================================================================
+// LOG ROTATION CONFIGURATION
+// =============================================================================
+
 // Log file size limit (5 MB)
 const maxSize = 5 * 1024 * 1024; // 5 MB
 
-// Utility function for consistent timestamps
+// Maximum number of archived files to keep per log type
+const maxArchivedFiles = 10;
+
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+/**
+ * Get PST timestamp for log entries
+ */
 const getPSTTimestamp = () => dayjs().tz("America/Los_Angeles").format("YYYY-MM-DD HH:mm:ss");
 
-// Utility function for safe filenames
+/**
+ * Get safe PST timestamp for filenames (no colons)
+ */
 const getSafePSTTimestamp = () => dayjs().tz("America/Los_Angeles").format("YYYY-MM-DD_HH-mm-ss");
 
-// Rotate log files if size exceeds the limit
-const rotateLogFile = (filePath) => {
-  if (fs.existsSync(filePath) && fs.statSync(filePath).size > maxSize) {
-    const rotatedFileName = filePath.replace(".txt", `-archived-${getSafePSTTimestamp()}.txt`);
-    fs.renameSync(filePath, rotatedFileName);
-    console.log(`[${getPSTTimestamp()}] Rotated log file: ${rotatedFileName}`);
-  }
-};
-
+/**
+ * Ensure directory exists for a file path
+ */
 const ensureDirectoryExists = (filePath) => {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true });
   }
 };
 
-// Write content to log files with rotation
+/**
+ * Clean up old archived log files, keeping only the most recent ones
+ * @param {string} filePath - The main log file path
+ */
+const cleanupOldArchives = (filePath) => {
+  try {
+    const dir = path.dirname(filePath);
+    const baseName = path.basename(filePath, '.txt');
+    
+    // Find all archived files for this log type
+    const files = fs.readdirSync(dir)
+      .filter(f => f.startsWith(baseName) && f.includes('-archived-'))
+      .map(f => ({
+        name: f,
+        path: path.join(dir, f),
+        mtime: fs.statSync(path.join(dir, f)).mtime.getTime()
+      }))
+      .sort((a, b) => b.mtime - a.mtime); // Newest first
+    
+    // Delete files beyond the max limit
+    if (files.length > maxArchivedFiles) {
+      const toDelete = files.slice(maxArchivedFiles);
+      toDelete.forEach(file => {
+        fs.unlinkSync(file.path);
+        console.log(`[${getPSTTimestamp()}] [${ENV_LABEL}] Cleaned up old archive: ${file.name}`);
+      });
+    }
+  } catch (error) {
+    console.error(`[${getPSTTimestamp()}] [${ENV_LABEL}] Failed to cleanup archives: ${error.message}`);
+  }
+};
+
+/**
+ * Rotate log files if size exceeds the limit
+ * Renames current file to archived format and cleans up old archives
+ */
+const rotateLogFile = (filePath) => {
+  try {
+    if (fs.existsSync(filePath) && fs.statSync(filePath).size > maxSize) {
+      const rotatedFileName = filePath.replace(".txt", `-archived-${getSafePSTTimestamp()}.txt`);
+      fs.renameSync(filePath, rotatedFileName);
+      console.log(`[${getPSTTimestamp()}] [${ENV_LABEL}] Rotated log file: ${rotatedFileName}`);
+      
+      // Clean up old archives
+      cleanupOldArchives(filePath);
+    }
+  } catch (error) {
+    console.error(`[${getPSTTimestamp()}] [${ENV_LABEL}] Failed to rotate log file: ${error.message}`);
+  }
+};
+
+/**
+ * Write content to log files with rotation
+ */
 const writeToFile = (filePath, content) => {
   try {
-    ensureDirectoryExists(filePath); // Ensure the directory exists
+    ensureDirectoryExists(filePath);
     rotateLogFile(filePath);
     fs.appendFileSync(filePath, content, "utf-8");
   } catch (error) {
-      console.error(`[${getPSTTimestamp()}] Failed to write to file: ${filePath}. Error: ${error.message}`);
+    console.error(`[${getPSTTimestamp()}] [${ENV_LABEL}] Failed to write to file: ${filePath}. Error: ${error.message}`);
   }
 };
-  
-// Write the progress log file
+
+/**
+ * Write the progress log file
+ */
 const writeProgressToFile = (content) => {
   writeToFile(progressFilePath, content);
 };
-  
-// Fetch progress from Redis and log to file
-const logProgressToFile = async () => {
 
+// =============================================================================
+// LOGGING FUNCTIONS WITH ENVIRONMENT PREFIXES
+// =============================================================================
+
+/**
+ * Log error messages to error-log.txt
+ * @param {string} message - Error message
+ * @param {Error|null} error - Optional error object for stack trace
+ */
+const logErrorToFile = (message, error = null) => {
+  let errorContent = `[${getPSTTimestamp()}] [${ENV_LABEL}] ${message}\n`;
+  if (error && error.stack) {
+    errorContent += `Stack Trace:\n${error.stack}\n`;
+  }
+  writeToFile(errorFilePath, errorContent);
+};
+
+/**
+ * Log info messages to info-log.txt
+ * @param {string} message - Info message
+ */
+const logInfoToFile = (message) => {
+  const content = `[${getPSTTimestamp()}] [${ENV_LABEL}] ${message}\n`;
+  writeToFile(infoFilePath, content);
+};
+
+/**
+ * Log update messages to updates-log.txt
+ * @param {string} message - Update message
+ */
+const logUpdatesToFile = (message) => {
+  const content = `[${getPSTTimestamp()}] [${ENV_LABEL}] ${message}\n`;
+  writeToFile(updatesFilePath, content);
+};
+
+/**
+ * Fetch progress from Redis and log to file
+ * @returns {Promise<boolean>} True if all files are complete
+ */
+const logProgressToFile = async () => {
   try {
     const fileKeys = await appRedis.keys("total-rows:*");
   
     if (fileKeys.length === 0) {
-      console.log(`[${getPSTTimestamp()}] No progress to log.`);
-      return false;  // No files at all => "nothing to do"
+      console.log(`[${getPSTTimestamp()}] [${ENV_LABEL}] No progress to log.`);
+      return false;
     }
 
     let progressLogs = "";
-    let allFilesComplete = true; // <-- Track if everything is done
+    let allFilesComplete = true;
 
     for (const key of fileKeys) {
-      // FIX: Robust fileKey extraction (handles colons in filename)
+      // Robust fileKey extraction (handles colons in filename)
       const fileKey = key.replace(/^total-rows:/, "");
 
       const totalRows = parseInt(await appRedis.get(`total-rows:${fileKey}`) || 0, 10);
@@ -88,31 +232,27 @@ const logProgressToFile = async () => {
       const progress = totalRows > 0 ? Math.round((completed / totalRows) * 100) : 0;
       const isComplete = completed >= totalRows && totalRows > 0;
 
-      // FIX: Skip spam for completed files - log completion ONCE only
+      // Skip spam for completed files - log completion ONCE only
       if (isComplete) {
         if (!completedFilesLogged.has(fileKey)) {
-          progressLogs += `[${getPSTTimestamp()}] ✅ File COMPLETED: ${fileKey}\n`;
+          progressLogs += `[${getPSTTimestamp()}] [${ENV_LABEL}] ✅ File COMPLETED: ${fileKey}\n`;
           progressLogs += `   Final stats - Updated: ${updated}, Skipped: ${skipped}, Failed: ${failed}, Total: ${totalRows}\n\n`;
           completedFilesLogged.add(fileKey);
         }
-        // Skip further logging for this file
         continue;
       }
 
       // File is still processing
       allFilesComplete = false;
 
-      // Build log output
-      progressLogs += `[${getPSTTimestamp()}] 📊 File ${fileKey}: ${completed}/${totalRows} rows processed (${progress}%)\n`;
+      progressLogs += `[${getPSTTimestamp()}] [${ENV_LABEL}] 📊 File ${fileKey}: ${completed}/${totalRows} rows processed (${progress}%)\n`;
       progressLogs += `   Updated: ${updated}, Skipped: ${skipped}, Failed: ${failed}\n\n`;
     }
 
-    // Only write if there's something meaningful to log
     if (progressLogs.trim()) {
       writeProgressToFile(progressLogs);
     }
 
-    // Return true only if every file is finished
     return allFilesComplete;
     
   } catch (error) {
@@ -121,42 +261,35 @@ const logProgressToFile = async () => {
   }
 };
 
-// Error logging function
-const logErrorToFile = (message, error = null) => {
-  let errorContent = `[${getPSTTimestamp()}] ${message}\n`;
-  if (error) errorContent += `Stack Trace:\n${error.stack}\n`;
-  writeToFile(errorFilePath, errorContent);
-};
-  
-// Info logging function
-const logInfoToFile = (message) => {
-  const content = `[${getPSTTimestamp()}] ${message}\n`;
-  writeToFile(infoFilePath, content);
-};
+// =============================================================================
+// PINO LOGGER SETUP
+// =============================================================================
 
-// Updates logging function
-const logUpdatesToFile = (message) => {
-  const content = `[${getPSTTimestamp()}] ${message}\n`;
-  writeToFile(updatesFilePath, content);
-};
-
-// Pino logger setup
 const pinoLogger = pino(
   {
-      base: null, // Removes default 'pid' and 'hostname' fields
-      timestamp: () => `,"time":"${getPSTTimestamp()}"`, // Use the custom timestamp function
+    base: null,
+    timestamp: () => `,"time":"${getPSTTimestamp()}","env":"${ENV_LABEL}"`,
   },
   pinoPretty({
-      levelFirst: true,
-      colorize: true,
-      translateTime: false, // Disable default time translation
+    levelFirst: true,
+    colorize: true,
+    translateTime: false,
+    messageFormat: `[${ENV_LABEL}] {msg}`,
   })
 );
 
+// =============================================================================
+// EXPORTS
+// =============================================================================
+
 module.exports = {
-  logger: pinoLogger, // Pino logger for external use
+  logger: pinoLogger,
   logUpdatesToFile,
   logErrorToFile,
   logInfoToFile,
-  logProgressToFile
+  logProgressToFile,
+  // Export for external use
+  ENV_LABEL,
+  executionMode,
+  getPSTTimestamp,
 };
