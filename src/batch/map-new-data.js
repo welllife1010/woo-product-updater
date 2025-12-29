@@ -53,18 +53,45 @@ const applyAliases = (normalizedRow) => {
 };
 
 /**
-* @function normalizeCsvHeaders
-* @description Produces a case/space-insensitive row so upstream CSV idiosyncrasies
-* don't propagate (e.g., "Voltage / Supply" → "voltage___supply").
-*/
+ * @function normalizeCsvHeaders
+ * @description Produces a stable, punctuation-tolerant row so vendor CSV
+ * idiosyncrasies don't propagate.
+ *
+ * Example:
+ *   "Voltage / Supply" -> "voltage_supply"
+ *   "Package / Case"  -> "package_case"
+ */
 const normalizeCsvHeaders = (item) => {
   const out = {};
-  Object.keys(item).forEach((key) => {
-    const normalizedKey = key.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+  Object.keys(item || {}).forEach((key) => {
+    const normalizedKey = String(key || "")
+      .replace(/\*/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "");
+
+    if (!normalizedKey) return;
     out[normalizedKey] = item[key];
   });
   return out;
 };
+
+function dedupeMetaData(metaData) {
+  if (!Array.isArray(metaData)) return [];
+
+  // Last write wins.
+  const byKey = new Map();
+  for (const entry of metaData) {
+    if (!entry || typeof entry !== "object") continue;
+    const key = entry.key;
+    if (!key) continue;
+    byKey.set(String(key), entry);
+  }
+  return Array.from(byKey.values());
+}
 
 /**
 * @function formatAcfFieldName
@@ -137,11 +164,11 @@ const createNewData = (item, productId, part_number) => {
     operating_temperature: "operating_temperature",
 
     // Voltage – support both old and new
-    voltage___supply: "voltage",
+    voltage_supply: "voltage",
     voltage: "voltage",
 
     // Packaging / package
-    package___case: "package",
+    package_case: "package",
     packaging: "packaging",
 
     supplier_device_package: "supplier_device_package",
@@ -206,9 +233,16 @@ const createNewData = (item, productId, part_number) => {
   return {
     id: productId,
     part_number: row.part_number || part_number,
-    sku: row.sku || `${row.part_number}_${row.manufacturer}` || row.part_number,
+    sku:
+      row.sku ||
+      `${row.part_number || part_number || ""}_${row.manufacturer || ""}`.replace(/^_+|_+$/g, "") ||
+      row.part_number ||
+      part_number,
     description: description,
-    meta_data: [...productMetaData, { key: "additional_key_information", value: additionalInfo || "" }],
+    meta_data: dedupeMetaData([
+      ...productMetaData,
+      { key: "additional_key_information", value: additionalInfo || "" },
+    ]),
   };
 };
 

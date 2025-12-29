@@ -7,11 +7,11 @@ WHY HERE?
 ================================================================================
 */
 
-const { appRedis } = require("../../queue");
-const { wooApi } = require("../../woo-helpers");
-const { scheduleApiRequest } = require("../../job-manager");
-const { logErrorToFile, logInfoToFile } = require("../../logger");
-const { createUniqueJobId } = require("../../utils");
+const { appRedis } = require("../services/queue");
+const { wooApi } = require("../services/woo-helpers");
+const { scheduleApiRequest } = require("../services/job-manager");
+const { logErrorToFile, logInfoToFile } = require("../utils/logger");
+const { createUniqueJobId } = require("../utils/utils");
 const { isUpdateNeeded } = require("./compare");
 
 /**

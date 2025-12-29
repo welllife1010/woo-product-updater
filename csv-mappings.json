@@ -1,39 +1,5 @@
 {
   "files": [
-    {
-      "fileKey": "woo-product-updater-test/11-27-2025-test/ledtech-test-nov-27-2025.csv",
-      "status": "ready",
-      "headers": [
-        "﻿Manufacturer Part Number*",
-        "Category",
-        "Mfr",
-        "Product Description*",
-        "Color",
-        "Configuration",
-        "Lens Color",
-        "Lens Transparency",
-        "Millicandela Rating",
-        "Lens Size",
-        "Voltage - Forward (Vf) (Typ)",
-        "Current - Test",
-        "Viewing Angle",
-        "Wavelength - Dominant",
-        "Wavelength - Peak",
-        "Size / Dimension",
-        "RoHS Compliance",
-        "REACH Compliance",
-        "HTS Code",
-        "ECCN",
-        "Moisture Sensitivity Level",
-        "Datasheet URL*",
-        "Image Attachment URL*"
-      ],
-      "mapping": {
-        "partNumber": "﻿Manufacturer Part Number*",
-        "category": "Category",
-        "manufacturer": "Mfr"
-      },
-      "uploadedAt": "2025-11-27T11:37:42.433Z"
-    }
+    {}
   ]
 }

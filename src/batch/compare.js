@@ -30,7 +30,7 @@ THE FIX:
 ================================================================================
 */
 
-const { logger, logInfoToFile, logErrorToFile } = require("../../logger");
+const { logger, logInfoToFile, logErrorToFile } = require("../utils/logger");
 const { normalizeText, isCurrentMetaMissing, isMetaValueDifferent } = require("./text-utils");
 
 /**

@@ -44,10 +44,10 @@
 // =============================================================================
 
 // Redis client for progress tracking
-const { appRedis } = require("../../queue");
+const { appRedis } = require("../services/queue");
 
 // Logging utilities
-const { logInfoToFile, logErrorToFile } = require("../../logger");
+const { logInfoToFile, logErrorToFile } = require("../utils/logger");
 
 // Product lookup and validation
 const { fetchProductData, validateProductMatch } = require("./fetch-validate");
@@ -66,10 +66,10 @@ const {
 const { recordBatchStatus } = require("./io-status");
 
 // Category resolution (fuzzy matching)
-const { resolveCategory } = require("../../category-map");
+const { resolveCategory } = require("../resolvers/category-map");
 
 // Category hierarchy creation in WooCommerce
-const { ensureCategoryHierarchy } = require("../../category-woo");
+const { ensureCategoryHierarchy } = require("../resolvers/category-woo");
 const { log } = require("util");
 
 // =============================================================================

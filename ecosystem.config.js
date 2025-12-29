@@ -274,7 +274,7 @@ module.exports = {
     },
 
     // =========================================================================
-    // APP 3: CSV MAPPING UI SERVER (csv-mapping-server.js)
+    // APP 3: CSV MAPPING UI SERVER (server.js)
     // =========================================================================
     // 
     // PURPOSE:
@@ -291,7 +291,7 @@ module.exports = {
     // =========================================================================
     {
       name: 'csv-mapping-ui',
-      script: './csv-mapping-server.js',
+      script: './server.js',
       
       // Working directory
       cwd: '/home/ubuntu/woo-product-update',

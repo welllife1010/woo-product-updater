@@ -39,7 +39,7 @@ TEST IDEAS:
 ================================================================================
 */
 
-const { logErrorToFile, logInfoToFile } = require("../../logger");
+const { logErrorToFile, logInfoToFile } = require("../utils/logger");
 
 /**
  * BUG FIX: Initialize with fallback IMMEDIATELY to prevent race condition.

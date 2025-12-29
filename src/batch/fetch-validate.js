@@ -11,23 +11,23 @@ NOTES:
 ================================================================================
 */
 
-const { logErrorToFile, logInfoToFile } = require("../../logger");
+const { logErrorToFile, logInfoToFile } = require("../utils/logger");
 const {
   getProductById,
   getProductIdByPartNumber,
-} = require("../../woo-helpers");
+} = require("../services/woo-helpers");
 
 // Use the smart category resolver to get the leaf Woo slug
 // NOTE: adjust the path if your category-resolver.js lives in src/batch.
 // - If category-resolver.js is at project root: "../../category-resolver"
 // - If category-resolver.js is in src/batch:     "./category-resolver"
-const { resolveLeafSlugSmart } = require("../../category-resolver");
+const { resolveLeafSlugSmart } = require("../resolvers/category-resolver");
 
 // Our local helper for writing missing-product JSON files
 const { recordMissingProduct } = require("./io-status");
 
 // Smart manufacturer resolver: aliases + fuzzy + auto-append new
-const { resolveManufacturerSmart } = require("../../manufacturer-resolver");
+const { resolveManufacturerSmart } = require("../resolvers/manufacturer-resolver");
 
 /**
  * @function fetchProductData
@@ -172,9 +172,11 @@ async function fetchProductData(
  *   - false → skip this row for safety
  */
 function validateProductMatch(item, currentData, _productId, _fileKey) {
+  const meta = Array.isArray(currentData?.meta_data) ? currentData.meta_data : [];
+
   // 1) Part number from Woo
   let currentPartNumber =
-    currentData.meta_data.find(
+    meta.find(
       (m) => m.key.toLowerCase() === "part_number"
     )?.value?.trim() || "";
 
@@ -185,7 +187,7 @@ function validateProductMatch(item, currentData, _productId, _fileKey) {
 
   // 2) Manufacturer from Woo
   let currentManufacturerRaw =
-    currentData.meta_data.find(
+    meta.find(
       (m) => m.key.toLowerCase() === "manufacturer"
     )?.value?.trim() || "";
 

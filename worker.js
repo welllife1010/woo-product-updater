@@ -65,19 +65,24 @@ const fs = require("fs");
 const { Worker } = require("bullmq");
 
 // Custom logging utilities
-const { logErrorToFile, logInfoToFile } = require("./logger");
+const { logErrorToFile, logInfoToFile } = require("./src/utils/logger");
 
-// Redis client for cleanup on shutdown
-const { appRedis } = require("./queue");
+// Redis client for cleanup on shutdown + BullMQ connection details
+const {
+  appRedis,
+  QUEUE_NAME,
+  BULLMQ_PREFIX,
+  bullmqConnection,
+} = require("./src/services/queue");
 
 // Main batch processing function
 const { processBatch } = require("./src/batch/process-batch");
 
 // Checkpoint management (with atomic save for race condition fix)
-const { 
+const {
   getLastProcessedRow,        // Sync version (for backward compatibility)
   saveCheckpointAtomic,       // Atomic save to prevent race conditions
-} = require("./checkpoint");
+} = require("./src/batch/checkpoint");
 
 // =============================================================================
 // CONFIGURATION
@@ -351,7 +356,7 @@ async function checkAndHandleCompletion() {
  */
 const batchWorker = new Worker(
   // Queue name - must match the queue name used when adding jobs
-  "batchQueue",
+  QUEUE_NAME || "batchQueue",
   
   // Job processor function - called for each job
   async (job) => {
@@ -552,11 +557,11 @@ const batchWorker = new Worker(
   
   // Worker configuration options
   {
-    // Redis connection settings
-    connection: {
-      host: process.env.REDIS_HOST || "127.0.0.1",
-      port: parseInt(process.env.REDIS_PORT) || 6379,
-    },
+    // Redis connection settings (MUST match queue.js, including TLS/auth/db)
+    connection: bullmqConnection,
+
+    // Prefix MUST match queue.js when BULLMQ_PREFIX is customized
+    prefix: BULLMQ_PREFIX || "bull",
     
     // How many jobs this worker processes in parallel
     concurrency: concurrency,

@@ -90,7 +90,6 @@ echo "📤 Step 2: Syncing files to EC2..."
 rsync -avz \
     --exclude 'node_modules' \
     --exclude '.git' \
-    --exclude '.env' \
     --exclude 'logs' \
     --exclude 'output-files' \
     --exclude 'batch_status' \
@@ -166,4 +165,3 @@ echo "   2. View logs: pm2 logs"
 echo "   3. Monitor: pm2 monit"
 echo "   4. Access UI: http://$EC2_HOST:4000"
 echo "=============================================="
-

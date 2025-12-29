@@ -14,8 +14,8 @@ dotenv.config();
 const express = require("express");
 const { performance } = require("perf_hooks");
 
-const { appRedis, batchQueue } = require("./queue");
-const { processReadyCsvFilesFromMappings } = require("./s3-helpers");
+const { appRedis, batchQueue } = require("./src/services/queue");
+const { processReadyCsvFilesFromMappings } = require("./src/services/s3-helpers");
 const {
   logger,
   logErrorToFile,
@@ -23,9 +23,9 @@ const {
   logInfoToFile,
   logProgressToFile,
   ENV_LABEL,
-} = require("./logger");
-const { createUniqueJobId } = require("./utils");
-const { addBatchJob } = require("./job-manager");
+} = require("./src/utils/logger");
+const { createUniqueJobId } = require("./src/utils/utils");
+const { addBatchJob } = require("./src/services/job-manager");
 
 const { BullMQAdapter } = require("@bull-board/api/bullMQAdapter");
 const { createBullBoard } = require("@bull-board/api");

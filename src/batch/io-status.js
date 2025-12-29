@@ -10,7 +10,7 @@ WHY A SEPARATE FILE?
 
 const fs = require("fs");
 const path = require("path");
-const { logErrorToFile, logInfoToFile } = require("../../logger");
+const { logErrorToFile, logInfoToFile } = require("../utils/logger");
 
 /**
 * @typedef {Object} BatchStatus
