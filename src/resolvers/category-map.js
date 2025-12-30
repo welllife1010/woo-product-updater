@@ -65,33 +65,75 @@ function pushCategoryRowFromCsvRow(csvRow, rows) {
  * You can call this once on startup or let resolveCategory() call it lazily.
  */
 function loadCategoryHierarchy(
-  csvFilePath = path.join(__dirname, "category-hierarchy-ref.csv")
+  csvFilePath =
+    process.env.CATEGORY_HIERARCHY_CSV_PATH ||
+    path.join(__dirname, "category-hierarchy-ref.csv")
 ) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     if (IS_LOADED) {
+      return resolve(CATEGORY_ROWS)
+    }
+
+    // If the CSV is missing, disable category resolution but do not crash.
+    // This is especially important in staging/production where the ref file
+    // may be mounted/copied separately.
+    if (!fs.existsSync(csvFilePath)) {
+      console.warn(
+        `[CategoryMap] ⚠️ Category hierarchy CSV not found at ${csvFilePath}. ` +
+          "Category resolution will be disabled until the file is provided."
+      )
+      CATEGORY_ROWS = []
+      IS_LOADED = true
+      buildCandidatesFromRows()
+      buildFuseIndex()
       return resolve(CATEGORY_ROWS)
     }
 
     const rows = []
 
-    fs.createReadStream(csvFilePath)
-      .pipe(csvParser())
+    // IMPORTANT: attach error handler to the read stream itself.
+    // Errors like ENOENT are emitted by the read stream, and do NOT reliably
+    // propagate through .pipe() to the parser, which can otherwise cause an
+    // uncaught exception.
+    let done = false
+    const finish = (loadedRows, err) => {
+      if (done) return
+      done = true
+
+      if (err) {
+        console.error(
+          `[CategoryMap] ❌ Failed to load category CSV at ${csvFilePath}:`,
+          err
+        )
+      }
+
+      CATEGORY_ROWS = loadedRows
+      IS_LOADED = true
+      buildCandidatesFromRows()
+      buildFuseIndex()
+
+      if (!err) {
+        console.log(
+          `[CategoryMap] ✅ Loaded ${loadedRows.length} category rows from ${csvFilePath}`
+        )
+      }
+
+      resolve(loadedRows)
+    }
+
+    const readStream = fs.createReadStream(csvFilePath)
+    readStream.on("error", (err) => finish([], err))
+
+    const parser = csvParser()
+    parser.on("error", (err) => finish([], err))
+
+    readStream
+      .pipe(parser)
       .on("data", (row) => {
         pushCategoryRowFromCsvRow(row, rows)
       })
       .on("end", () => {
-        CATEGORY_ROWS = rows
-        IS_LOADED = true
-        buildCandidatesFromRows()
-        buildFuseIndex()
-        console.log(
-          `[CategoryMap] ✅ Loaded ${rows.length} category rows from ${csvFilePath}`
-        )
-        resolve(rows)
-      })
-      .on("error", (err) => {
-        console.error("[CategoryMap] ❌ Failed to read category CSV:", err)
-        reject(err)
+        finish(rows)
       })
   })
 }

@@ -188,12 +188,32 @@ function createApiRouter(config) {
       // This fixes any historical bad states and prevents processing without required columns.
       let changed = false;
       const now = new Date().toISOString();
+      // Also: remove invalid entries (e.g. {} objects) which can confuse the UI.
+      const beforeCount = Array.isArray(mappings.files) ? mappings.files.length : 0;
+      mappings.files = (mappings.files || []).filter((f) => f && typeof f.fileKey === "string" && f.fileKey.trim());
+      if (mappings.files.length !== beforeCount) changed = true;
+
       for (const f of mappings.files || []) {
         if (!f || !f.fileKey) continue;
-        if (f.status === "ready" && !isMappingComplete(f.mapping)) {
-          f.status = "pending";
-          f.updatedAt = now;
-          changed = true;
+
+        // Keep terminal states.
+        if (f.status === "processing" || f.status === "completed") continue;
+
+        // Enforce: mapping incomplete => pending (regardless of what status says).
+        // This ensures the UI never shows READY for a file that cannot run.
+        if (!isMappingComplete(f.mapping)) {
+          if (f.status !== "pending") {
+            f.status = "pending";
+            f.updatedAt = now;
+            changed = true;
+          }
+        } else {
+          // Mapping complete: keep existing status, but normalize unknown/missing to pending.
+          if (!f.status || typeof f.status !== "string") {
+            f.status = "pending";
+            f.updatedAt = now;
+            changed = true;
+          }
         }
       }
       if (changed) writeMappings(config.paths.mappingsPath, mappings);

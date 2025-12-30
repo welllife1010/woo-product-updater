@@ -102,6 +102,34 @@ rsync -avz \
 
 echo "   ✅ Files synced successfully"
 
+# Quick verification: ensure the UI API routes we rely on actually landed.
+echo ""
+echo "🔎 Step 2b: Verifying critical files on server..."
+
+LOCAL_API_SHA=$(shasum -a 256 "$PROJECT_DIR/ui/routes/api.js" | awk '{print $1}')
+REMOTE_API_SHA=$(ssh -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "shasum -a 256 $APP_DIR/ui/routes/api.js 2>/dev/null | awk '{print \$1}'")
+
+echo "   Local ui/routes/api.js:  $LOCAL_API_SHA"
+echo "   Remote ui/routes/api.js: $REMOTE_API_SHA"
+
+if [ -z "$REMOTE_API_SHA" ]; then
+    echo "   ⚠️  Could not read remote ui/routes/api.js checksum"
+else
+    if [ "$LOCAL_API_SHA" != "$REMOTE_API_SHA" ]; then
+        echo "   ❌ Checksum mismatch: ui/routes/api.js did not sync correctly"
+        echo "   (Aborting before restart so we don't run stale code)"
+        exit 1
+    fi
+fi
+
+HAS_PROGRESS_DELETE=$(ssh -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "grep -n 'router.delete(\"/progress/:fileKey\"' $APP_DIR/ui/routes/api.js >/dev/null 2>&1 && echo yes || echo no")
+if [ "$HAS_PROGRESS_DELETE" != "yes" ]; then
+    echo "   ❌ Missing DELETE /progress/:fileKey route on server (stale api.js?)"
+    exit 1
+fi
+
+echo "   ✅ Verified ui/routes/api.js synced and includes DELETE /progress/:fileKey"
+
 # =============================================================================
 # STEP 3: Install dependencies and restart PM2
 # =============================================================================

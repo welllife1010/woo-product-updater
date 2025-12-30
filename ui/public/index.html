@@ -419,6 +419,7 @@
     let currentEnv = { mode: 'unknown', label: 'UNKNOWN', bucket: '' };
 
     let lastMappings = null;
+    let lastProgress = {};
     let mappingModalState = { fileKey: null, status: null };
     
     // ==========================================================================
@@ -556,6 +557,16 @@
       if (raw === 'ready' && !isMappingComplete(file?.mapping)) return 'pending';
       return raw;
     }
+
+    function normalizeProgressStats(p) {
+      const totalRows = Number(p?.totalRows) || 0;
+      const updated = Number(p?.updated) || 0;
+      const skipped = Number(p?.skipped) || 0;
+      const failed = Number(p?.failed) || 0;
+      const completed = Number(p?.completed) || (updated + skipped + failed);
+      const percentage = totalRows > 0 ? Math.round((completed / totalRows) * 100) : 0;
+      return { totalRows, updated, skipped, failed, completed, percentage };
+    }
     
     function renderFiles(files) {
       const container = document.getElementById('file-list');
@@ -567,6 +578,32 @@
       }
       container.innerHTML = validFiles.map(file => {
         const status = effectiveFileStatus(file);
+        const stats = normalizeProgressStats(lastProgress?.[file.fileKey]);
+        const pct = Math.min(100, Math.max(0, Number(stats.percentage) || 0));
+        const hasProgress = (Number(stats.totalRows) || 0) > 0;
+
+        const progressHtml = `
+          <div style="margin-top: 8px;">
+            <div class="progress-bar" style="height: 8px; margin-top: 0;">
+              <div class="progress-bar-fill" style="width: ${pct}%"></div>
+            </div>
+            <div class="progress-stats" style="margin-top: 6px;">
+              ${hasProgress
+                ? `
+                  <span class="progress-pill">${pct}%</span>
+                  <span class="progress-pill">Total: ${stats.totalRows}</span>
+                  <span class="progress-pill">Updated: ${stats.updated}</span>
+                  <span class="progress-pill">Skipped: ${stats.skipped}</span>
+                  <span class="progress-pill">Failed: ${stats.failed}</span>
+                `
+                : `<span class="progress-pill">Not started</span>`
+              }
+            </div>
+          </div>
+        `;
+
+        const mappingComplete = isMappingComplete(file.mapping);
+
         return `
         <div class="file-item">
           <div class="file-info">
@@ -574,11 +611,15 @@
             <div class="file-status">
               <span class="status-badge status-${status}">${status}</span>
               <span class="form-help" style="display:block;margin-top:6px;">${mappingSummary(file.mapping)}</span>
+              ${progressHtml}
             </div>
           </div>
           <div class="file-actions">
             <button class="btn btn-xs btn-secondary" onclick="openMappingModal('${file.fileKey}')">🧩 Map</button>
-            <button class="btn btn-xs btn-primary" onclick="setFileStatus('${file.fileKey}', 'ready')">✅ Ready</button>
+            ${mappingComplete
+              ? `<button class="btn btn-xs btn-primary" onclick="setFileStatus('${file.fileKey}', 'ready')">✅ Ready</button>`
+              : `<button class="btn btn-xs btn-primary" onclick="openMappingModal('${file.fileKey}')" title="Set mapping to enable READY">✅ Ready</button>`
+            }
             <button class="btn btn-xs btn-danger" onclick="deleteFile('${file.fileKey}')">🗑️</button>
           </div>
         </div>
@@ -761,9 +802,15 @@
     // ==========================================================================
     // RUN STATUS + PROGRESS
     // ==========================================================================
-    function renderProgress(progress) {
+    function renderProgress(progress, files) {
       const container = document.getElementById('progress-list');
-      const entries = Object.entries(progress || {});
+      const progressByFileKey = progress || {};
+      const fileKeys = Array.from(new Set([
+        ...Object.keys(progressByFileKey),
+        ...((files || []).map(f => f?.fileKey).filter(Boolean))
+      ]));
+
+      const entries = fileKeys.map((fk) => [fk, normalizeProgressStats(progressByFileKey[fk])]);
 
       if (!entries.length) {
         container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 20px;">No progress yet</p>';
@@ -771,12 +818,13 @@
       }
 
       container.innerHTML = entries.map(([fileKey, p]) => {
-        const pct = Number(p.percentage) || 0;
+        const pct = Math.min(100, Math.max(0, Number(p.percentage) || 0));
+        const hasProgress = (Number(p.totalRows) || 0) > 0;
         return `
           <div class="progress-item">
             <div class="progress-top">
               <div class="progress-file">${fileKey}</div>
-              <div class="progress-meta">${pct}%</div>
+              <div class="progress-meta">${hasProgress ? `${pct}%` : '—'}</div>
               <button class="btn btn-xs btn-danger" title="Remove Progress" onclick="removeProgress('${fileKey}')">🗑️</button>
             </div>
             <div class="progress-bar"><div class="progress-bar-fill" style="width: ${Math.min(100, Math.max(0, pct))}%"></div></div>
@@ -826,7 +874,10 @@
           badge.title = (data.reasons || []).join(' | ') || 'Blocked';
         }
 
-        renderProgress(data.progress || {});
+        lastProgress = data.progress || {};
+        renderProgress(lastProgress, lastMappings?.files || []);
+        // Keep the CSV list progress bars in sync too.
+        if (lastMappings?.files) renderFiles(lastMappings.files);
       } catch (err) {
         console.error('Failed to fetch run status:', err);
       }
