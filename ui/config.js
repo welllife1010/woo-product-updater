@@ -1,17 +1,16 @@
 const fs = require("fs");
 const path = require("path");
 
+const {
+  resolveAppEnv,
+  getEnvLabel: getEnvLabelForAppEnv,
+  getS3BucketName,
+} = require("../src/config/runtime-env");
+
+// Backward-compat: UI historically called this "executionMode".
+// Under Option A, it is the resolved APP_ENV (production|staging|development).
 function getEnvLabel(executionMode) {
-  switch (executionMode) {
-    case "production":
-      return "PROD";
-    case "test":
-      return "STAGING";
-    case "development":
-      return "DEV";
-    default:
-      return String(executionMode || "").toUpperCase() || "UNKNOWN";
-  }
+  return getEnvLabelForAppEnv(executionMode);
 }
 
 function pickStaticDir(uiDir) {
@@ -27,16 +26,14 @@ function createUiConfig(env = process.env) {
   const uiDir = __dirname; // ui/
   const repoRoot = path.resolve(uiDir, "..");
 
-  const executionMode = env.EXECUTION_MODE || "production";
+  const executionMode = resolveAppEnv(env);
   const envLabel = getEnvLabel(executionMode);
 
   const port = Number(env.CSV_MAPPING_PORT || 4000);
 
   const s3Region = env.AWS_REGION || env.AWS_REGION_NAME || "us-west-1";
 
-  const s3BucketName = (executionMode === "development" || executionMode === "test")
-    ? env.S3_BUCKET_NAME_TEST
-    : env.S3_BUCKET_NAME;
+  const s3BucketName = getS3BucketName(env, executionMode);
 
   const paths = {
     repoRoot,
@@ -56,6 +53,7 @@ function createUiConfig(env = process.env) {
 
   return {
     executionMode,
+    appEnv: executionMode,
     envLabel,
     port,
     s3Region,

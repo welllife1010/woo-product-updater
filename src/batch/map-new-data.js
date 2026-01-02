@@ -190,6 +190,22 @@ const createNewData = (item, productId, part_number) => {
 
     htsuscode: "htsus_code",
     htsus_code: "htsus_code",
+
+    // Basic Product Info
+    manufacturer_lead_weeks: "manufacturer_lead_weeks",
+
+    // Document & Media
+    pcn_design_specification: "pcn_design_specification",
+    pcn_design: "pcn_design_specification",
+    pcn_assembly_origin: "pcn_assembly_origin",
+    pcn_assembly: "pcn_assembly_origin",
+    pcn_packaging: "pcn_packaging",
+    html_datasheet: "html_datasheet",
+    eda_models: "eda_models",
+
+    // Environmental Info (general)
+    environmental_information: "environmental_information",
+    environmental_info: "environmental_information",
     };
 
   const productMetaData = Object.keys(metaDataKeyMap)
@@ -208,11 +224,129 @@ const createNewData = (item, productId, part_number) => {
   // 3) additional_key_information: prefer existing field; otherwise compose
   let additionalInfo = row["additional_info"] || "";
   if (!additionalInfo) {
+    // Helper to check if a value looks like a URL
+    const isUrlValue = (val) => {
+      if (typeof val !== "string") return false;
+      const trimmed = val.trim().toLowerCase();
+      return (
+        trimmed.startsWith("http://") ||
+        trimmed.startsWith("https://") ||
+        trimmed.startsWith("https") ||  // catch malformed URLs like "https//..."
+        trimmed.startsWith("www.") ||
+        /^[a-z0-9.-]+\.[a-z]{2,}(\/|$)/i.test(trimmed) // matches domain-like patterns
+      );
+    };
+
+    // Helper to check if a key is price-related
+    const isPriceRelatedKey = (key) => {
+      const lowerKey = key.toLowerCase();
+      return (
+        lowerKey.includes("price") ||
+        lowerKey.includes("cost") ||
+        lowerKey.includes("msrp") ||
+        /^price_?\d*$/.test(lowerKey) ||  // matches price, price_1, price1, etc.
+        /^unit_?price/.test(lowerKey)
+      );
+    };
+
+    // Helper to check if a key is quantity-related
+    const isQuantityRelatedKey = (key) => {
+      const lowerKey = key.toLowerCase();
+      return (
+        lowerKey.includes("quantity") ||
+        lowerKey.includes("qty") ||
+        /^quantity_?\d*$/.test(lowerKey) ||  // matches quantity, quantity_1, etc.
+        lowerKey.includes("order_quantity") ||
+        lowerKey.includes("minimum_order") ||
+        lowerKey.includes("multiple_order")
+      );
+    };
+
+    // Helper to check if a key is stock-related
+    const isStockRelatedKey = (key) => {
+      const lowerKey = key.toLowerCase();
+      return (
+        lowerKey.includes("stock") ||
+        lowerKey.includes("on_hand") ||
+        lowerKey.includes("inventory")
+      );
+    };
+
+    // Helper to check if a key is status-related (we have manufacturer_status elsewhere)
+    const isStatusRelatedKey = (key) => {
+      const lowerKey = key.toLowerCase();
+      return (
+        lowerKey.includes("status") ||
+        lowerKey.includes("part_status") ||
+        lowerKey.includes("product_status")
+      );
+    };
+
+    // Helper to check if a key is rohs-related (already mapped elsewhere)
+    const isRohsRelatedKey = (key) => {
+      const lowerKey = key.toLowerCase();
+      return (
+        lowerKey.includes("rohs") ||
+        lowerKey.includes("reach")
+      );
+    };
+
+    // Helper to check if a key is currency-related
+    const isCurrencyRelatedKey = (key) => {
+      const lowerKey = key.toLowerCase();
+      return lowerKey.includes("currency");
+    };
+
+    // Helper to check if a key is region-related
+    const isRegionRelatedKey = (key) => {
+      const lowerKey = key.toLowerCase();
+      return lowerKey.includes("region");
+    };
+
+    // Helper to check if a key contains URL-related keywords
+    const isUrlRelatedKey = (key) => {
+      const lowerKey = key.toLowerCase();
+      return (
+        lowerKey.includes("url") ||
+        lowerKey.includes("link") ||
+        lowerKey.includes("_uri") ||
+        lowerKey === "https" ||
+        lowerKey === "http"
+      );
+    };
+
     Object.keys(row).forEach((key) => {
       // Only include keys not already mapped and not explicitly excluded
       if (!metaDataKeyMap[key] && key !== "datasheet" && key !== "part_number" && key !== "additional_info") {
         const value = row[key] || "";
         if (value !== "" && value !== "NaN") {
+          // Skip price-related fields (we don't show price to customers)
+          if (isPriceRelatedKey(key)) return;
+
+          // Skip quantity-related fields (already handled in dedicated quantity field)
+          if (isQuantityRelatedKey(key)) return;
+
+          // Skip stock-related fields (already handled elsewhere)
+          if (isStockRelatedKey(key)) return;
+
+          // Skip status-related fields (we have manufacturer_status elsewhere)
+          if (isStatusRelatedKey(key)) return;
+
+          // Skip rohs/reach-related fields (already mapped to dedicated fields)
+          if (isRohsRelatedKey(key)) return;
+
+          // Skip currency-related fields
+          if (isCurrencyRelatedKey(key)) return;
+
+          // Skip region-related fields
+          if (isRegionRelatedKey(key)) return;
+
+          // Skip fields with URL-related keywords in key name
+          if (isUrlRelatedKey(key)) return;
+
+          // Skip fields where the value is a URL (don't display URL text)
+          if (isUrlValue(value)) return;
+
           const formattedKey = formatAcfFieldName(key);
           const excluded = new Set([
             // Keep this curated: items you never want duplicated into additional info.

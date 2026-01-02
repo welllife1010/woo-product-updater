@@ -278,6 +278,19 @@ async function getFileCompletionStatus(fileKey) {
   }
 }
 
+// =============================================================================
+// COMPLETION LOG DEDUPE (avoid repeating the same "complete" logs when idle)
+// =============================================================================
+
+// Tracks which files we've already announced as complete (and with what stats)
+// so periodic completion checks don't spam the logs.
+const announcedCompletedFileSignatures = new Map(); // fileKey -> signature string
+
+// Tracks whether we've already announced the "all tracked files completed" banner
+// for the current tracked set.
+let lastTrackedFilesSignature = null;
+let allCompleteAnnouncedForSignature = false;
+
 /**
  * Check all currently tracked files and handle completion.
  * - Marks completed files in csv-mappings.json
@@ -297,6 +310,14 @@ async function checkAndHandleCompletion() {
       return;
     }
     
+    // If the tracked set changes (new file starts / cleared / etc.), allow a new
+    // "all complete" announcement.
+    const trackedFilesSignature = fileKeys.slice().sort().join("|");
+    if (trackedFilesSignature !== lastTrackedFilesSignature) {
+      lastTrackedFilesSignature = trackedFilesSignature;
+      allCompleteAnnouncedForSignature = false;
+    }
+
     let allComplete = true;
     const completedFileKeys = [];
     
@@ -306,12 +327,27 @@ async function checkAndHandleCompletion() {
       
       if (complete) {
         completedFileKeys.push(fileKey);
-        logInfoToFile(
-          `✅ File ${fileKey} complete: ${stats.updated} updated, ` +
-          `${stats.skipped} skipped, ${stats.failed} failed`
-        );
+
+        // Only log completion once per file+stats signature to avoid spam when
+        // periodic checks run but nothing has changed.
+        const signature = `${stats.totalRows}|${stats.updated}|${stats.skipped}|${stats.failed}`;
+        const lastSignature = announcedCompletedFileSignatures.get(fileKey);
+        if (lastSignature !== signature) {
+          announcedCompletedFileSignatures.set(fileKey, signature);
+          logInfoToFile(
+            `✅ File ${fileKey} complete: ${stats.updated} updated, ` +
+            `${stats.skipped} skipped, ${stats.failed} failed`
+          );
+        }
       } else {
         allComplete = false;
+
+        // If the file is no longer complete (e.g., restarted/cleared/reset),
+        // allow a future completion log again.
+        if (announcedCompletedFileSignatures.has(fileKey)) {
+          announcedCompletedFileSignatures.delete(fileKey);
+        }
+
         // Only log progress occasionally to avoid spam
         if (completionCheckCounter % 50 === 0 && stats.totalRows > 0) {
           logInfoToFile(
@@ -327,7 +363,8 @@ async function checkAndHandleCompletion() {
     }
     
     // If all tracked files are complete, check for new ready files
-    if (allComplete && completedFileKeys.length > 0) {
+    if (allComplete && completedFileKeys.length > 0 && !allCompleteAnnouncedForSignature) {
+      allCompleteAnnouncedForSignature = true;
       logInfoToFile(`🎉 All ${completedFileKeys.length} tracked file(s) completed!`);
       
       // Small delay to let things settle before checking for more work

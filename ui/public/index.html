@@ -233,8 +233,16 @@
             document.addEventListener('DOMContentLoaded', function() {
               var bullBoardLink = document.getElementById('bull-board-link');
               if (bullBoardLink) {
-                var port = window.location.port ? ':' + window.location.port : ':3000';
-                var url = window.location.protocol + '//' + window.location.hostname + port + '/admin/queues';
+                // Bull Board is served by the MAIN app (index.js) on port 3000.
+                // The UI itself runs on 4000, so we must NOT reuse window.location.port.
+                // If you're reverse-proxying ports differently, update this logic accordingly.
+                var bullPort = '3000';
+                // If someone is already on the main app port (e.g., local dev), keep it.
+                if (window.location.port && window.location.port !== '4000') {
+                  bullPort = window.location.port;
+                }
+                var portPart = bullPort ? (':' + bullPort) : '';
+                var url = window.location.protocol + '//' + window.location.hostname + portPart + '/admin/queues';
                 bullBoardLink.setAttribute('href', url);
               }
             });
@@ -267,22 +275,11 @@
         <!-- Files Card -->
         <div class="card">
           <div class="card-header">
-            <h2>📁 CSV Files</h2>
+            <h2>📁 CSV Files Progress</h2>
             <button type="button" class="btn btn-xs btn-secondary" onclick="loadAndRenderFiles()">🔄</button>
           </div>
           <div class="file-list" id="file-list">
             <p class="text-muted">Loading files...</p>
-          </div>
-        </div>
-
-        <!-- Progress (moved under CSV Files for easier reading) -->
-        <div class="card">
-          <div class="card-header">
-            <h2>📈 Progress</h2>
-            <button type="button" class="btn btn-xs btn-secondary" onclick="fetchRunStatus()">🔄</button>
-          </div>
-          <div class="progress-list" id="progress-list">
-            <p class="text-muted" style="text-align: center; padding: 20px;">No progress yet</p>
           </div>
         </div>
       </div>
@@ -584,7 +581,7 @@
 
         const progressHtml = `
           <div style="margin-top: 8px;">
-            <div class="progress-bar" style="height: 8px; margin-top: 0;">
+            <div class="progress-bar" style="height: 10px; margin-top: 0; position: relative;">
               <div class="progress-bar-fill" style="width: ${pct}%"></div>
             </div>
             <div class="progress-stats" style="margin-top: 6px;">
@@ -595,6 +592,7 @@
                   <span class="progress-pill">Updated: ${stats.updated}</span>
                   <span class="progress-pill">Skipped: ${stats.skipped}</span>
                   <span class="progress-pill">Failed: ${stats.failed}</span>
+                  <span class="progress-pill">Done: ${stats.completed}</span>
                 `
                 : `<span class="progress-pill">Not started</span>`
               }
@@ -619,6 +617,10 @@
             ${mappingComplete
               ? `<button class="btn btn-xs btn-primary" onclick="setFileStatus('${file.fileKey}', 'ready')">✅ Ready</button>`
               : `<button class="btn btn-xs btn-primary" onclick="openMappingModal('${file.fileKey}')" title="Set mapping to enable READY">✅ Ready</button>`
+            }
+            ${hasProgress
+              ? `<button class="btn btn-xs btn-danger" title="Clear Progress" onclick="removeProgress('${file.fileKey}')">🧹</button>`
+              : ``
             }
             <button class="btn btn-xs btn-danger" onclick="deleteFile('${file.fileKey}')">🗑️</button>
           </div>
@@ -802,49 +804,15 @@
     // ==========================================================================
     // RUN STATUS + PROGRESS
     // ==========================================================================
-    function renderProgress(progress, files) {
-      const container = document.getElementById('progress-list');
-      const progressByFileKey = progress || {};
-      const fileKeys = Array.from(new Set([
-        ...Object.keys(progressByFileKey),
-        ...((files || []).map(f => f?.fileKey).filter(Boolean))
-      ]));
-
-      const entries = fileKeys.map((fk) => [fk, normalizeProgressStats(progressByFileKey[fk])]);
-
-      if (!entries.length) {
-        container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 20px;">No progress yet</p>';
-        return;
-      }
-
-      container.innerHTML = entries.map(([fileKey, p]) => {
-        const pct = Math.min(100, Math.max(0, Number(p.percentage) || 0));
-        const hasProgress = (Number(p.totalRows) || 0) > 0;
-        return `
-          <div class="progress-item">
-            <div class="progress-top">
-              <div class="progress-file">${fileKey}</div>
-              <div class="progress-meta">${hasProgress ? `${pct}%` : '—'}</div>
-              <button class="btn btn-xs btn-danger" title="Remove Progress" onclick="removeProgress('${fileKey}')">🗑️</button>
-            </div>
-            <div class="progress-bar"><div class="progress-bar-fill" style="width: ${Math.min(100, Math.max(0, pct))}%"></div></div>
-            <div class="progress-stats">
-              <span class="progress-pill">Total: ${p.totalRows || 0}</span>
-              <span class="progress-pill">Updated: ${p.updated || 0}</span>
-              <span class="progress-pill">Skipped: ${p.skipped || 0}</span>
-              <span class="progress-pill">Failed: ${p.failed || 0}</span>
-              <span class="progress-pill">Done: ${p.completed || 0}</span>
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
     async function removeProgress(fileKey) {
       if (!confirm(`Remove progress for ${fileKey}?`)) return;
       try {
         await apiRequest(`/api/progress/${encodeURIComponent(fileKey)}`, { method: 'DELETE' });
         showToast('Progress removed', 'success');
+        // Update local cache immediately
+        if (lastProgress && typeof lastProgress === 'object') {
+          delete lastProgress[fileKey];
+        }
         fetchRunStatus();
       } catch (err) {
         showToast('Failed to remove progress', 'error');
@@ -853,6 +821,11 @@
     
     async function fetchRunStatus() {
       try {
+        // If we don't have mappings yet, load them first so we can render the file list.
+        if (!lastMappings) {
+          await loadAndRenderFiles();
+        }
+
         const data = await apiRequest('/api/run-status');
 
         const badge = document.getElementById('run-status-badge');
@@ -875,8 +848,7 @@
         }
 
         lastProgress = data.progress || {};
-        renderProgress(lastProgress, lastMappings?.files || []);
-        // Keep the CSV list progress bars in sync too.
+        // Keep the CSV list progress bars in sync.
         if (lastMappings?.files) renderFiles(lastMappings.files);
       } catch (err) {
         console.error('Failed to fetch run status:', err);
@@ -1086,7 +1058,9 @@
       // Set up refresh intervals
       setInterval(fetchLogs, CONFIG.LOG_REFRESH_INTERVAL);
       setInterval(fetchSystemStatus, CONFIG.REFRESH_INTERVAL);
+      setInterval(fetchRunStatus, CONFIG.REFRESH_INTERVAL); // live progress
       setInterval(fetchEnvironment, 30000); // Refresh environment every 30s
+      setInterval(loadAndRenderFiles, 30000); // keep status/mappings fresh
       
       // Trigger log refresh on filter change
       document.getElementById('log-type').addEventListener('change', fetchLogs);

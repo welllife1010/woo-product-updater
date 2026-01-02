@@ -30,29 +30,23 @@ dayjs.extend(timezone);
 // ENVIRONMENT CONFIGURATION
 // =============================================================================
 
-/**
- * Get the current execution mode and derive environment label
- */
-const executionMode = process.env.EXECUTION_MODE || "production";
+const { resolveAppEnv, getEnvLabel } = require("../config/runtime-env");
 
 /**
- * Environment label for log prefixes
- * Maps EXECUTION_MODE to human-readable labels
+ * Unambiguous environment selector.
+ *
+ * Option A prefers APP_ENV (production|staging|development), with
+ * backward-compat fallback from EXECUTION_MODE (test -> staging).
  */
-const getEnvLabel = () => {
-  switch (executionMode) {
-    case "production":
-      return "PROD";
-    case "test":
-      return "STAGING";
-    case "development":
-      return "DEV";
-    default:
-      return executionMode.toUpperCase();
-  }
-};
+const appEnv = resolveAppEnv(process.env);
 
-const ENV_LABEL = getEnvLabel();
+/**
+ * Backward-compat export name: executionMode.
+ * Keep this so existing callers/tests don't break during migration.
+ */
+const executionMode = appEnv;
+
+const ENV_LABEL = getEnvLabel(appEnv);
 
 // =============================================================================
 // FILE PATHS
@@ -292,6 +286,7 @@ module.exports = {
   logProgressToFile,
   // Export for external use
   ENV_LABEL,
+  appEnv,
   executionMode,
   getPSTTimestamp,
 };

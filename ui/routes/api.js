@@ -232,7 +232,7 @@ function createApiRouter(config) {
       if (!config.s3BucketName) {
         return res.status(500).json({
           error:
-            "S3 bucket is not configured. Set S3_BUCKET_NAME (or S3_BUCKET_NAME_TEST for dev/test).",
+            "S3 bucket is not configured. Set S3_BUCKET_NAME_PRODUCTION/STAGING/DEVELOPMENT (or legacy S3_BUCKET_NAME/S3_BUCKET_NAME_TEST).",
         });
       }
 
@@ -323,7 +323,7 @@ function createApiRouter(config) {
     }
   });
 
-  router.delete("/csv-mappings/:fileKey", (req, res) => {
+  router.delete("/csv-mappings/:fileKey", async (req, res) => {
     try {
       const fileKey = decodeURIComponent(req.params.fileKey);
       const mappings = readMappings(config.paths.mappingsPath);
@@ -331,7 +331,41 @@ function createApiRouter(config) {
       mappings.files = mappings.files.filter((f) => f.fileKey !== fileKey);
       writeMappings(config.paths.mappingsPath, mappings);
 
-      res.json({ success: true });
+      // Best-effort cleanup: remove progress keys + checkpoint entries so UI stays consistent.
+      // Do not fail the request if Redis/checkpoints are unavailable.
+      try {
+        await withRedis(config.redisUrl, async (redis) => {
+          const keys = [
+            `total-rows:${fileKey}`,
+            `updated-products:${fileKey}`,
+            `skipped-products:${fileKey}`,
+            `failed-products:${fileKey}`,
+          ];
+          await redis.del(keys);
+        });
+      } catch (e) {
+        console.error(
+          `[csv-mappings:delete] Failed to clear Redis progress for ${fileKey}: ${e.message}`
+        );
+      }
+
+      for (const checkpointPath of config.paths.checkpointPaths || []) {
+        try {
+          if (!checkpointPath || !fs.existsSync(checkpointPath)) continue;
+          const raw = fs.readFileSync(checkpointPath, "utf-8") || "{}";
+          const json = JSON.parse(raw);
+          if (json && Object.prototype.hasOwnProperty.call(json, fileKey)) {
+            delete json[fileKey];
+            fs.writeFileSync(checkpointPath, JSON.stringify(json, null, 2));
+          }
+        } catch (e) {
+          console.error(
+            `[csv-mappings:delete] Failed to clear checkpoint for ${fileKey}: ${e.message}`
+          );
+        }
+      }
+
+      res.json({ success: true, fileKey });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -352,7 +386,7 @@ function createApiRouter(config) {
       if (!config.s3BucketName) {
         return res.status(500).json({
           error:
-            "S3 bucket is not configured. Set S3_BUCKET_NAME (or S3_BUCKET_NAME_TEST for dev/test).",
+            "S3 bucket is not configured. Set S3_BUCKET_NAME_PRODUCTION/STAGING/DEVELOPMENT (or legacy S3_BUCKET_NAME/S3_BUCKET_NAME_TEST).",
         });
       }
 

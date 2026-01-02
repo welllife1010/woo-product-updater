@@ -5,33 +5,19 @@ require('dotenv').config();
 const WooCommerceRestApi = require('woocommerce-rest-ts-api').default;
 const { logInfoToFile } = require('../../utils/logger');
 
-const executionMode = process.env.EXECUTION_MODE || 'production';
+const {
+  resolveAppEnv,
+  getWooConfig,
+  requireNonEmpty,
+} = require('../../config/runtime-env');
 
-function getWooConfig() {
-  if (executionMode === 'test') {
-    return {
-      url: process.env.WOO_API_BASE_URL_TEST,
-      consumerKey: process.env.WOO_API_CONSUMER_KEY_TEST,
-      consumerSecret: process.env.WOO_API_CONSUMER_SECRET_TEST,
-    };
-  }
+const appEnv = resolveAppEnv(process.env);
+const wooConfig = getWooConfig(process.env, appEnv);
 
-  if (executionMode === 'development') {
-    return {
-      url: process.env.WOO_API_BASE_URL_DEV,
-      consumerKey: process.env.WOO_API_CONSUMER_KEY_DEV,
-      consumerSecret: process.env.WOO_API_CONSUMER_SECRET_DEV,
-    };
-  }
-
-  return {
-    url: process.env.WOO_API_BASE_URL,
-    consumerKey: process.env.WOO_API_CONSUMER_KEY,
-    consumerSecret: process.env.WOO_API_CONSUMER_SECRET,
-  };
-}
-
-const wooConfig = getWooConfig();
+// Fail fast with a clear error if credentials are missing.
+requireNonEmpty(wooConfig.url, 'WOO_API_BASE_URL_*');
+requireNonEmpty(wooConfig.consumerKey, 'WOO_API_CONSUMER_KEY_*');
+requireNonEmpty(wooConfig.consumerSecret, 'WOO_API_CONSUMER_SECRET_*');
 
 const wooApi = new WooCommerceRestApi({
   url: wooConfig.url,
@@ -42,11 +28,13 @@ const wooApi = new WooCommerceRestApi({
   timeout: 60000,
 });
 
-logInfoToFile(`WooCommerce API initialized for ${executionMode} mode: ${wooConfig.url}`);
+logInfoToFile(`WooCommerce API initialized for ${appEnv} environment: ${wooConfig.url}`);
 
 module.exports = {
   wooApi,
   wooConfig,
-  executionMode,
+  appEnv,
+  // Backward-compat exports
+  executionMode: appEnv,
   getWooConfig,
 };

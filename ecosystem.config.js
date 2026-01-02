@@ -47,14 +47,14 @@
  *   pm2 status                      # Check process status
  * 
  * =============================================================================
- * ENVIRONMENT MAPPING:
+ * ENVIRONMENT MAPPING (Option A):
  * =============================================================================
  * 
- *   PM2 Environment    │ EXECUTION_MODE │ WooCommerce Site
- *   ───────────────────┼────────────────┼──────────────────────────────────
- *   (default/env)      │ production     │ https://suntsu.com
- *   --env staging      │ test           │ https://env-suntsucom-staging.kinsta.cloud
- *   --env development  │ development    │ https://suntsudev.wpenginepowered.com
+ *   PM2 Environment    │ APP_ENV       │ WooCommerce Site
+ *   ───────────────────┼───────────────┼──────────────────────────────────
+ *   (default/env)      │ production    │ https://suntsu.com
+ *   --env staging      │ staging       │ https://env-suntsucom-staging.kinsta.cloud
+ *   --env development  │ development   │ https://env-suntsucom-development.kinsta.cloud
  * 
  * =============================================================================
  * SECURITY NOTE:
@@ -142,7 +142,7 @@ module.exports = {
         NODE_ENV: 'production',
         
         // CRITICAL: Must be 'production' to use production WooCommerce credentials
-        EXECUTION_MODE: 'production',
+        APP_ENV: 'production',
         
         // Server port
         PORT: 3000,
@@ -158,10 +158,8 @@ module.exports = {
       env_staging: {
         NODE_ENV: 'production',  // Still production Node behavior
         
-        // BUG FIX: Changed from 'stage' to 'test'
-        // The codebase only recognizes: 'production', 'development', 'test'
-        // 'test' mode uses WOO_API_*_TEST variables from .env
-        EXECUTION_MODE: 'test',
+        // Option A: staging means staging (no more staging->test mapping)
+        APP_ENV: 'staging',
         
         // Server port
         PORT: 3000,
@@ -177,8 +175,7 @@ module.exports = {
       env_development: {
         NODE_ENV: 'development',
         
-        // 'development' mode uses WOO_API_*_DEV variables from .env
-        EXECUTION_MODE: 'development',
+        APP_ENV: 'development',
         
         // Server port
         PORT: 3000,
@@ -251,7 +248,7 @@ module.exports = {
       // =====================================================================
       env: {
         NODE_ENV: 'production',
-        EXECUTION_MODE: 'production',
+        APP_ENV: 'production',
       },
       
       // =====================================================================
@@ -261,7 +258,7 @@ module.exports = {
       // =====================================================================
       env_staging: {
         NODE_ENV: 'production',
-        EXECUTION_MODE: 'test',
+        APP_ENV: 'staging',
       },
       
       // =====================================================================
@@ -269,7 +266,7 @@ module.exports = {
       // =====================================================================
       env_development: {
         NODE_ENV: 'development',
-        EXECUTION_MODE: 'development',
+        APP_ENV: 'development',
       },
     },
 
@@ -337,7 +334,7 @@ module.exports = {
       // =====================================================================
       env: {
         NODE_ENV: 'production',
-        EXECUTION_MODE: 'production',
+        APP_ENV: 'production',
         CSV_MAPPING_PORT: 4000,
       },
       
@@ -346,7 +343,7 @@ module.exports = {
       // =====================================================================
       env_staging: {
         NODE_ENV: 'production',
-        EXECUTION_MODE: 'test',
+        APP_ENV: 'staging',
         CSV_MAPPING_PORT: 4000,
       },
       
@@ -355,7 +352,7 @@ module.exports = {
       // =====================================================================
       env_development: {
         NODE_ENV: 'development',
-        EXECUTION_MODE: 'development',
+        APP_ENV: 'development',
         CSV_MAPPING_PORT: 4000,
       },
     },
