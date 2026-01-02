@@ -255,6 +255,11 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   // MAIN PROCESSING LOOP
   // =========================================================================
   
+  // =========================================================================
+  // Track batch processing start - increment processing counter for batch size
+  // =========================================================================
+  await appRedis.incrBy(`processing-products:${fileKey}`, batch.length);
+
   for (let i = 0; i < batch.length; i++) {
     const item = batch[i];
     const currentIndex = startIndex + i; // Absolute row index in the CSV
@@ -266,6 +271,11 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       logInfoToFile(
         `processBatch() - Reached end of file at index ${currentIndex}. Stopping.`
       );
+      // Decrement processing counter for remaining unprocessed rows
+      const remainingRows = batch.length - i;
+      if (remainingRows > 0) {
+        await appRedis.decrBy(`processing-products:${fileKey}`, remainingRows);
+      }
       break;
     }
 
@@ -277,6 +287,8 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       failedParts.push(
         `Row ${currentIndex + 1}: Missing part_number - skipped`
       );
+      // Decrement processing counter - this row is now complete (failed)
+      await appRedis.decr(`processing-products:${fileKey}`);
       continue;
     }
 
@@ -533,9 +545,12 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
    */
   if (skipCount > 0) {
     await appRedis.incrBy(`skipped-products:${fileKey}`, skipCount);
+    // Decrement processing counter for skipped rows
+    await appRedis.decrBy(`processing-products:${fileKey}`, skipCount);
   }
   if (localFailCount > 0) {
     await appRedis.incrBy(`failed-products:${fileKey}`, localFailCount);
+    // Note: failed rows already decremented processing counter individually
   }
 
   // =========================================================================

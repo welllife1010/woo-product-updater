@@ -340,6 +340,7 @@ function createApiRouter(config) {
             `updated-products:${fileKey}`,
             `skipped-products:${fileKey}`,
             `failed-products:${fileKey}`,
+            `processing-products:${fileKey}`,
           ];
           await redis.del(keys);
         });
@@ -597,6 +598,10 @@ function createApiRouter(config) {
             (await redis.get(`failed-products:${fileKey}`)) || 0,
             10
           );
+          const processing = parseInt(
+            (await redis.get(`processing-products:${fileKey}`)) || 0,
+            10
+          );
 
           const completed = updated + skipped + failed;
 
@@ -605,6 +610,7 @@ function createApiRouter(config) {
             updated,
             skipped,
             failed,
+            processing,
             completed,
             percentage:
               totalRows > 0 ? Math.round((completed / totalRows) * 100) : 0,
@@ -635,6 +641,7 @@ function createApiRouter(config) {
           `updated-products:${fileKey}`,
           `skipped-products:${fileKey}`,
           `failed-products:${fileKey}`,
+          `processing-products:${fileKey}`,
         ];
         return await redis.del(keys);
       });

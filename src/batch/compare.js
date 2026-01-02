@@ -6,6 +6,21 @@ FILE: src/batch/compare.js
 PURPOSE:
 Decide whether an update is needed by comparing current vs new data.
 
+NOTE (2026): This file is now SECONDARY to build-update-payload.js
+The primary update logic now uses buildUpdatePayload() which:
+1. Returns ONLY fields that need updating (diff-based)
+2. Has centralized protection rules for all fields
+3. Is used by handlers.js for actual updates
+
+This file (isUpdateNeeded, filterCurrentData) is kept for:
+- Backwards compatibility
+- Additional logging/debugging
+- Legacy code that may still reference it
+
+For new development, use build-update-payload.js instead.
+
+================================================================================
+
 ADDED VALUE:
 - Filters current meta to only fields we track (avoids noise)
 - Encodes all special skip rules in one place

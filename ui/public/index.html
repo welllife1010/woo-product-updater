@@ -560,9 +560,10 @@
       const updated = Number(p?.updated) || 0;
       const skipped = Number(p?.skipped) || 0;
       const failed = Number(p?.failed) || 0;
+      const processing = Number(p?.processing) || 0;
       const completed = Number(p?.completed) || (updated + skipped + failed);
       const percentage = totalRows > 0 ? Math.round((completed / totalRows) * 100) : 0;
-      return { totalRows, updated, skipped, failed, completed, percentage };
+      return { totalRows, updated, skipped, failed, processing, completed, percentage };
     }
     
     function renderFiles(files) {
@@ -589,9 +590,10 @@
                 ? `
                   <span class="progress-pill">${pct}%</span>
                   <span class="progress-pill">Total: ${stats.totalRows}</span>
-                  <span class="progress-pill">Updated: ${stats.updated}</span>
+                  ${stats.processing > 0 ? `<span class="progress-pill" style="background: #fef3c7; color: #b45309;">⏳ Processing: ${stats.processing}</span>` : ''}
+                  <span class="progress-pill" style="background: #dcfce7; color: #15803d;">✓ Updated: ${stats.updated}</span>
                   <span class="progress-pill">Skipped: ${stats.skipped}</span>
-                  <span class="progress-pill">Failed: ${stats.failed}</span>
+                  ${stats.failed > 0 ? `<span class="progress-pill" style="background: #fee2e2; color: #dc2626;">✗ Failed: ${stats.failed}</span>` : `<span class="progress-pill">Failed: ${stats.failed}</span>`}
                   <span class="progress-pill">Done: ${stats.completed}</span>
                 `
                 : `<span class="progress-pill">Not started</span>`

@@ -17,6 +17,7 @@ const initializeFileTracking = async (fileKey, totalRows) => {
     const updatedKey = `updated-products:${fileKey}`;
     const skippedKey = `skipped-products:${fileKey}`;
     const failedKey = `failed-products:${fileKey}`;
+    const processingKey = `processing-products:${fileKey}`;
 
     const existingTotal = await appRedis.get(totalKey);
 
@@ -29,6 +30,7 @@ const initializeFileTracking = async (fileKey, totalRows) => {
         [updatedKey]: "0",
         [skippedKey]: "0",
         [failedKey]: "0",
+        [processingKey]: "0",
       });
       logInfoToFile(
         `✅ Initialized Redis tracking for ${fileKey} (${totalRows} total rows)`
@@ -37,16 +39,18 @@ const initializeFileTracking = async (fileKey, totalRows) => {
     }
 
     // Resume path: ensure missing counters exist, but don't clobber existing progress.
-    const [u, s, f] = await Promise.all([
+    const [u, s, f, p] = await Promise.all([
       appRedis.get(updatedKey),
       appRedis.get(skippedKey),
       appRedis.get(failedKey),
+      appRedis.get(processingKey),
     ]);
 
     const toInit = {};
     if (u === null) toInit[updatedKey] = "0";
     if (s === null) toInit[skippedKey] = "0";
     if (f === null) toInit[failedKey] = "0";
+    if (p === null) toInit[processingKey] = "0";
     if (Object.keys(toInit).length) {
       await appRedis.mSet(toInit);
     }

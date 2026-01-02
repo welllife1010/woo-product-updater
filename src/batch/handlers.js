@@ -3,7 +3,8 @@
 FILE: src/batch/handlers.js
 PURPOSE: Mode-specific update handlers + the bulk API executor.
 WHY HERE?
-- Separates decision-making (compare.js) from mutation mechanics.
+- Separates decision-making from mutation mechanics.
+- Uses centralized buildUpdatePayload for diff-based updates.
 ================================================================================
 */
 
@@ -12,41 +13,52 @@ const { wooApi } = require("../services/woo-helpers");
 const { scheduleApiRequest } = require("../services/job-manager");
 const { logErrorToFile, logInfoToFile } = require("../utils/logger");
 const { createUniqueJobId } = require("../utils/utils");
-const { isUpdateNeeded } = require("./compare");
+const { buildUpdatePayload, buildQuantityOnlyPayload } = require("./build-update-payload");
 
 /**
 * @function handleQuantityUpdate
 * @description Pushes a minimal update when quantity value actually changes.
+* Uses centralized buildQuantityOnlyPayload for consistency.
 * @returns {boolean} true if we queued an update; false if skipped.
 */
 function handleQuantityUpdate(newData, currentData, toUpdate, productId, item) {
-  const currentQuantity = currentData.meta_data.find((m) => m.key === "quantity")?.value || "0";
-  const newQuantity = newData.meta_data.find((m) => m.key === "quantity")?.value || "0";
+  const { payload, changed } = buildQuantityOnlyPayload(
+    currentData, 
+    newData, 
+    productId, 
+    item.part_number
+  );
 
-  if (currentQuantity === newQuantity) {
-    logInfoToFile(`🔎 Skipping ${item.part_number}, quantity unchanged: ${currentQuantity}`);
+  if (!changed || !payload) {
+    logInfoToFile(`🔎 Skipping ${item.part_number}, quantity unchanged`);
     return false;
   }
 
-  toUpdate.push({
-    id: productId,
-    manufacturer: item.manufacturer,
-    meta_data: [{ key: "quantity", value: String(newQuantity) }],
-  });
-
+  // Add manufacturer for reference
+  payload.manufacturer = item.manufacturer;
+  toUpdate.push(payload);
   return true;
 }
 
 /**
 * @function handleFullUpdate
-* @description Queues a full update (entire newData) only if comparison says so.
+* @description Queues a diff-based update (only changed fields).
+* Uses centralized buildUpdatePayload for all field-level decisions.
 */
 function handleFullUpdate(newData, currentData, toUpdate, productId, item, fileKey) {
-  if (!isUpdateNeeded(currentData, newData, undefined, undefined, item.part_number, fileKey)) {
+  const { payload, changedFields, skippedFields } = buildUpdatePayload(
+    currentData,
+    newData,
+    item.part_number,
+    fileKey
+  );
+
+  if (!payload || changedFields.length === 0) {
     logInfoToFile(`Skipping ${item.part_number} (no changes detected).`);
     return false;
   }
-  toUpdate.push(newData);
+
+  toUpdate.push(payload);
   return true;
 }
 
@@ -79,6 +91,10 @@ async function executeBatchUpdate(toUpdate, fileKey, MAX_RETRIES) {
 
       const updatedCount = response.data?.update?.length || 0;
       await appRedis.incrBy(`updated-products:${fileKey}`, updatedCount);
+      // Decrement processing counter for successfully updated products
+      if (updatedCount > 0) {
+        await appRedis.decrBy(`processing-products:${fileKey}`, updatedCount);
+      }
       return; // success
     } catch (err) {
       attempts++;
