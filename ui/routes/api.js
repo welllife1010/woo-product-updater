@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const { withRedis } = require("../services/redis");
+const { progressKeys } = require("../../src/services/queue");
 const { readMappings, writeMappings } = require("../services/mappings-store");
 const {
   readRecentLogs,
@@ -335,14 +336,14 @@ function createApiRouter(config) {
       // Do not fail the request if Redis/checkpoints are unavailable.
       try {
         await withRedis(config.redisUrl, async (redis) => {
-          const keys = [
-            `total-rows:${fileKey}`,
-            `updated-products:${fileKey}`,
-            `skipped-products:${fileKey}`,
-            `failed-products:${fileKey}`,
-            `processing-products:${fileKey}`,
-          ];
-          await redis.del(keys);
+          const keys = progressKeys.allKeys(fileKey);
+          await redis.del([
+            keys.totalRows,
+            keys.updated,
+            keys.skipped,
+            keys.failed,
+            keys.processing,
+          ]);
         });
       } catch (e) {
         console.error(
@@ -444,17 +445,17 @@ function createApiRouter(config) {
         const counts = await getQueueActivityCounts();
         alreadyRunning = isQueueRunning(counts);
       } catch (err) {
-        // Fallback: use Redis progress keys.
+        // Fallback: use Redis progress keys (environment-specific).
         const progress = await withRedis(config.redisUrl, async (redis) => {
-          const fileKeys = await redis.keys("total-rows:*");
+          const fileKeys = await redis.keys(progressKeys.totalRowsPattern());
           const out = {};
 
           for (const key of fileKeys) {
-            const fk = key.replace(/^total-rows:/, "");
-            const totalRows = parseInt((await redis.get(`total-rows:${fk}`)) || 0, 10);
-            const updated = parseInt((await redis.get(`updated-products:${fk}`)) || 0, 10);
-            const skipped = parseInt((await redis.get(`skipped-products:${fk}`)) || 0, 10);
-            const failed = parseInt((await redis.get(`failed-products:${fk}`)) || 0, 10);
+            const fk = progressKeys.extractFileKey(key);
+            const totalRows = parseInt((await redis.get(progressKeys.totalRows(fk))) || 0, 10);
+            const updated = parseInt((await redis.get(progressKeys.updatedProducts(fk))) || 0, 10);
+            const skipped = parseInt((await redis.get(progressKeys.skippedProducts(fk))) || 0, 10);
+            const failed = parseInt((await redis.get(progressKeys.failedProducts(fk))) || 0, 10);
             const completed = updated + skipped + failed;
             out[fk] = { totalRows, updated, skipped, failed, completed };
           }
@@ -523,15 +524,15 @@ function createApiRouter(config) {
       const mappings = readMappings(config.paths.mappingsPath);
 
       const progress = await withRedis(config.redisUrl, async (redis) => {
-        const fileKeys = await redis.keys("total-rows:*");
+        const fileKeys = await redis.keys(progressKeys.totalRowsPattern());
         const out = {};
 
         for (const key of fileKeys) {
-          const fk = key.replace(/^total-rows:/, "");
-          const totalRows = parseInt((await redis.get(`total-rows:${fk}`)) || 0, 10);
-          const updated = parseInt((await redis.get(`updated-products:${fk}`)) || 0, 10);
-          const skipped = parseInt((await redis.get(`skipped-products:${fk}`)) || 0, 10);
-          const failed = parseInt((await redis.get(`failed-products:${fk}`)) || 0, 10);
+          const fk = progressKeys.extractFileKey(key);
+          const totalRows = parseInt((await redis.get(progressKeys.totalRows(fk))) || 0, 10);
+          const updated = parseInt((await redis.get(progressKeys.updatedProducts(fk))) || 0, 10);
+          const skipped = parseInt((await redis.get(progressKeys.skippedProducts(fk))) || 0, 10);
+          const failed = parseInt((await redis.get(progressKeys.failedProducts(fk))) || 0, 10);
           const completed = updated + skipped + failed;
           out[fk] = {
             totalRows,
@@ -578,28 +579,36 @@ function createApiRouter(config) {
   // ---- Progress
   router.get("/progress", async (req, res) => {
     try {
+      // Get queue activity counts for job-level visibility
+      let queueCounts = { waiting: 0, active: 0, delayed: 0 };
+      try {
+        queueCounts = await getQueueActivityCounts();
+      } catch (e) {
+        console.error(`[progress] Failed to get queue counts: ${e.message}`);
+      }
+
       const progress = await withRedis(config.redisUrl, async (redis) => {
-        const fileKeys = await redis.keys("total-rows:*");
+        const fileKeys = await redis.keys(progressKeys.totalRowsPattern());
         const out = {};
 
         for (const key of fileKeys) {
-          const fileKey = key.replace(/^total-rows:/, "");
+          const fileKey = progressKeys.extractFileKey(key);
 
-          const totalRows = parseInt((await redis.get(`total-rows:${fileKey}`)) || 0, 10);
+          const totalRows = parseInt((await redis.get(progressKeys.totalRows(fileKey))) || 0, 10);
           const updated = parseInt(
-            (await redis.get(`updated-products:${fileKey}`)) || 0,
+            (await redis.get(progressKeys.updatedProducts(fileKey))) || 0,
             10
           );
           const skipped = parseInt(
-            (await redis.get(`skipped-products:${fileKey}`)) || 0,
+            (await redis.get(progressKeys.skippedProducts(fileKey))) || 0,
             10
           );
           const failed = parseInt(
-            (await redis.get(`failed-products:${fileKey}`)) || 0,
+            (await redis.get(progressKeys.failedProducts(fileKey))) || 0,
             10
           );
           const processing = parseInt(
-            (await redis.get(`processing-products:${fileKey}`)) || 0,
+            (await redis.get(progressKeys.processingProducts(fileKey))) || 0,
             10
           );
 
@@ -622,6 +631,7 @@ function createApiRouter(config) {
 
       res.json({
         progress,
+        queue: queueCounts,
         environment: config.envLabel,
       });
     } catch (err) {
@@ -636,14 +646,14 @@ function createApiRouter(config) {
       const fileKey = decodeURIComponent(req.params.fileKey);
 
       const deleted = await withRedis(config.redisUrl, async (redis) => {
-        const keys = [
-          `total-rows:${fileKey}`,
-          `updated-products:${fileKey}`,
-          `skipped-products:${fileKey}`,
-          `failed-products:${fileKey}`,
-          `processing-products:${fileKey}`,
-        ];
-        return await redis.del(keys);
+        const keys = progressKeys.allKeys(fileKey);
+        return await redis.del([
+          keys.totalRows,
+          keys.updated,
+          keys.skipped,
+          keys.failed,
+          keys.processing,
+        ]);
       });
 
       // Also clear checkpoint entries (so resume logic doesn't re-hydrate progress)

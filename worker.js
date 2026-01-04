@@ -70,6 +70,7 @@ const { logErrorToFile, logInfoToFile } = require("./src/utils/logger");
 // Redis client for cleanup on shutdown + BullMQ connection details
 const {
   appRedis,
+  progressKeys,
   QUEUE_NAME,
   BULLMQ_PREFIX,
   bullmqConnection,
@@ -255,16 +256,16 @@ function triggerMainAppRestart() {
  */
 async function getFileCompletionStatus(fileKey) {
   try {
-    const totalRows = parseInt((await appRedis.get(`total-rows:${fileKey}`)) || "0", 10);
+    const totalRows = parseInt((await appRedis.get(progressKeys.totalRows(fileKey))) || "0", 10);
     
     // If no total rows tracked, file isn't being processed
     if (totalRows === 0) {
       return { complete: false, stats: { totalRows: 0, processed: 0 } };
     }
     
-    const updated = parseInt((await appRedis.get(`updated-products:${fileKey}`)) || "0", 10);
-    const skipped = parseInt((await appRedis.get(`skipped-products:${fileKey}`)) || "0", 10);
-    const failed = parseInt((await appRedis.get(`failed-products:${fileKey}`)) || "0", 10);
+    const updated = parseInt((await appRedis.get(progressKeys.updatedProducts(fileKey))) || "0", 10);
+    const skipped = parseInt((await appRedis.get(progressKeys.skippedProducts(fileKey))) || "0", 10);
+    const failed = parseInt((await appRedis.get(progressKeys.failedProducts(fileKey))) || "0", 10);
     
     const processedCount = updated + skipped + failed;
     
@@ -298,8 +299,8 @@ let allCompleteAnnouncedForSignature = false;
  */
 async function checkAndHandleCompletion() {
   try {
-    // Get all file keys being tracked in Redis
-    const fileKeys = await appRedis.keys("total-rows:*");
+    // Get all file keys being tracked in Redis (environment-specific)
+    const fileKeys = await appRedis.keys(progressKeys.totalRowsPattern());
     
     if (fileKeys.length === 0) {
       // No files being tracked - check if there are ready files to start
@@ -322,7 +323,7 @@ async function checkAndHandleCompletion() {
     const completedFileKeys = [];
     
     for (const key of fileKeys) {
-      const fileKey = key.replace(/^total-rows:/, "");
+      const fileKey = progressKeys.extractFileKey(key);
       const { complete, stats } = await getFileCompletionStatus(fileKey);
       
       if (complete) {
@@ -474,7 +475,7 @@ const batchWorker = new Worker(
         );
         batchStartIndex = getLastProcessedRow(fileKey);
         logInfoToFile(
-          `📌 Job ${job.id}: Retrieved lastProcessedRow=${batchStartIndex} from checkpoint`
+          `Job ${job.id}: Retrieved lastProcessedRow=${batchStartIndex} from checkpoint`
         );
       }
 
@@ -673,8 +674,8 @@ batchWorker.on("error", (error) => {
  */
 const checkAllFilesProcessed = async () => {
   try {
-    // Get all file keys being tracked in Redis
-    const fileKeys = await appRedis.keys("total-rows:*");
+    // Get all file keys being tracked in Redis (environment-specific)
+    const fileKeys = await appRedis.keys(progressKeys.totalRowsPattern());
     
     // FIX: No files = KEEP WAITING, not "all done"
     // Returning true here causes shutdown → PM2 restart → infinite loop!
@@ -685,14 +686,13 @@ const checkAllFilesProcessed = async () => {
     
     for (const key of fileKeys) {
       // Extract the fileKey from the Redis key pattern
-      // Using regex with anchor (^) to only match at start
-      const fileKey = key.replace(/^total-rows:/, "");
+      const fileKey = progressKeys.extractFileKey(key);
       
       // Get tracking data for this file
-      const totalRows = parseInt((await appRedis.get(`total-rows:${fileKey}`)) || "0", 10);
-      const updated = parseInt((await appRedis.get(`updated-products:${fileKey}`)) || "0", 10);
-      const skipped = parseInt((await appRedis.get(`skipped-products:${fileKey}`)) || "0", 10);
-      const failed = parseInt((await appRedis.get(`failed-products:${fileKey}`)) || "0", 10);
+      const totalRows = parseInt((await appRedis.get(progressKeys.totalRows(fileKey))) || "0", 10);
+      const updated = parseInt((await appRedis.get(progressKeys.updatedProducts(fileKey))) || "0", 10);
+      const skipped = parseInt((await appRedis.get(progressKeys.skippedProducts(fileKey))) || "0", 10);
+      const failed = parseInt((await appRedis.get(progressKeys.failedProducts(fileKey))) || "0", 10);
 
       const processedCount = updated + skipped + failed;
 

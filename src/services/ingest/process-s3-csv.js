@@ -3,8 +3,6 @@
  * Keeps the same behavior as the original src/services/s3-helpers.js.
  */
 
-const { batchQueue } = require("../queue");
-
 const { logErrorToFile, logInfoToFile, logUpdatesToFile } = require("../../utils/logger");
 
 const { getReadyCsvFiles, getMappingForFile, markFileAsCompleted } = require("../csv-mapping-store");
@@ -75,34 +73,18 @@ const readCSVAndEnqueueJobs = async (bucketName, key, batchSize) => {
 
   await initializeFileTracking(key, totalRows);
 
-  // Prefer checkpoint for resume, because completed jobs are pruned
-  // (queue default removeOnComplete=100), which makes job-history-based
-  // resume incorrect for large files.
+  // Get checkpoint for resume - this is the source of truth for where to resume.
+  // NOTE: 0 is a valid value meaning "start from beginning", so we don't fall back
+  // to job scanning which can return incorrect values from other environments.
   let resumeFromRow = 0;
   try {
     resumeFromRow = await getLastProcessedRowAsync(key);
+    logInfoToFile(`📍 Checkpoint value for ${key}: ${resumeFromRow}`);
   } catch (error) {
     logErrorToFile(
-      `⚠️ Failed to read checkpoint for ${key}: ${error.message}. Falling back to completed job scan.`
+      `⚠️ Failed to read checkpoint for ${key}: ${error.message}. Starting from row 0.`
     );
-  }
-
-  // Backward-compatible fallback: if checkpoint not present, scan completed jobs.
-  if (!resumeFromRow) {
-    const completedJobs = await batchQueue.getJobs(["completed"]);
-
-    const completedRowNumbers = completedJobs
-      .filter((job) => job.data?.fileKey === key)
-      .map((job) => {
-        if (typeof job.data?.startIndex === "number") {
-          return job.data.startIndex + (job.data.batch?.length || 0);
-        }
-        const match = job.id?.match(/row-(\d+)/);
-        return match ? Number(match[1]) : 0;
-      });
-
-    resumeFromRow =
-      completedRowNumbers.length > 0 ? Math.max(...completedRowNumbers) : 0;
+    resumeFromRow = 0;
   }
 
   if (isNaN(resumeFromRow) || resumeFromRow < 0) {

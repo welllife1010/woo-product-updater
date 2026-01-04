@@ -96,6 +96,7 @@ rsync -avz \
     --exclude 'missing-products' \
     --exclude 'tmp-uploads' \
     --exclude 'process_checkpoint.json' \
+    --exclude 'csv-mappings.json' \
     --exclude '*.log' \
     -e "ssh -i $SSH_KEY" \
     ./ "$EC2_USER@$EC2_HOST:$APP_DIR/"

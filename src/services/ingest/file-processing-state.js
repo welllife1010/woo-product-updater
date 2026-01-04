@@ -8,29 +8,25 @@
 const fs = require("fs");
 const path = require("path");
 
-const { batchQueue, appRedis } = require("../queue");
+const { batchQueue, appRedis, progressKeys, CURRENT_ENV } = require("../queue");
 const { logErrorToFile, logInfoToFile } = require("../../utils/logger");
 
 const initializeFileTracking = async (fileKey, totalRows) => {
   try {
-    const totalKey = `total-rows:${fileKey}`;
-    const updatedKey = `updated-products:${fileKey}`;
-    const skippedKey = `skipped-products:${fileKey}`;
-    const failedKey = `failed-products:${fileKey}`;
-    const processingKey = `processing-products:${fileKey}`;
+    const keys = progressKeys.allKeys(fileKey);
 
-    const existingTotal = await appRedis.get(totalKey);
+    const existingTotal = await appRedis.get(keys.totalRows);
 
     // Always keep totalRows up-to-date (safe), but do NOT reset counters when resuming.
-    await appRedis.set(totalKey, String(totalRows));
+    await appRedis.set(keys.totalRows, String(totalRows));
 
     if (existingTotal === null) {
       // Fresh start for this file.
       await appRedis.mSet({
-        [updatedKey]: "0",
-        [skippedKey]: "0",
-        [failedKey]: "0",
-        [processingKey]: "0",
+        [keys.updated]: "0",
+        [keys.skipped]: "0",
+        [keys.failed]: "0",
+        [keys.processing]: "0",
       });
       logInfoToFile(
         `✅ Initialized Redis tracking for ${fileKey} (${totalRows} total rows)`
@@ -40,17 +36,17 @@ const initializeFileTracking = async (fileKey, totalRows) => {
 
     // Resume path: ensure missing counters exist, but don't clobber existing progress.
     const [u, s, f, p] = await Promise.all([
-      appRedis.get(updatedKey),
-      appRedis.get(skippedKey),
-      appRedis.get(failedKey),
-      appRedis.get(processingKey),
+      appRedis.get(keys.updated),
+      appRedis.get(keys.skipped),
+      appRedis.get(keys.failed),
+      appRedis.get(keys.processing),
     ]);
 
     const toInit = {};
-    if (u === null) toInit[updatedKey] = "0";
-    if (s === null) toInit[skippedKey] = "0";
-    if (f === null) toInit[failedKey] = "0";
-    if (p === null) toInit[processingKey] = "0";
+    if (u === null) toInit[keys.updated] = "0";
+    if (s === null) toInit[keys.skipped] = "0";
+    if (f === null) toInit[keys.failed] = "0";
+    if (p === null) toInit[keys.processing] = "0";
     if (Object.keys(toInit).length) {
       await appRedis.mSet(toInit);
     }
@@ -83,16 +79,25 @@ const checkExistingJobs = async (fileKey) => {
 
 const isFileFullyProcessed = (fileKey) => {
   // Support both legacy and current checkpoint locations.
-  // - legacy: <repoRoot>/process_checkpoint.json
-  // - current: <repoRoot>/src/batch/process_checkpoint.json
+  // Each environment has its own checkpoint file to prevent cross-environment pollution.
   const repoRoot = path.resolve(__dirname, "..", "..", "..");
   const checkpointCandidates = [
+    path.join(repoRoot, `process_checkpoint_${CURRENT_ENV}.json`),
+    path.join(repoRoot, "src", "batch", `process_checkpoint_${CURRENT_ENV}.json`),
+    // Legacy fallback (non-env-specific) - only check if env-specific doesn't exist
     path.join(repoRoot, "process_checkpoint.json"),
     path.join(repoRoot, "src", "batch", "process_checkpoint.json"),
   ];
 
+  // Prefer environment-specific checkpoint files
   const checkpointPath = checkpointCandidates.find((p) => fs.existsSync(p));
   if (!checkpointPath) return false;
+
+  // If we found a legacy (non-env-specific) file, don't trust it for this environment
+  if (!checkpointPath.includes(`_${CURRENT_ENV}`)) {
+    logInfoToFile(`⚠️ Found legacy checkpoint file ${checkpointPath}, ignoring for ${CURRENT_ENV} environment`);
+    return false;
+  }
 
   try {
     const checkpointData = JSON.parse(

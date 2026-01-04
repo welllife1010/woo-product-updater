@@ -23,7 +23,7 @@ FIELD PROTECTION RULES:
 */
 
 const { logInfoToFile } = require("../utils/logger");
-const { normalizeText } = require("./text-utils");
+const { normalizeText, normalizeUrlDomains } = require("./text-utils");
 const { 
   mergeAdditionalKeyInfo, 
   parseAdditionalKeyInfo 
@@ -151,9 +151,14 @@ function isProtectedDatasheet(currentValue, newValue) {
  * @returns {{ update: boolean, value?: string, reason?: string }}
  */
 function shouldUpdateField(key, currentValue, newValue) {
-  // Normalize for comparison
-  const normalizedCurrent = normalizeText(currentValue || "");
-  const normalizedNew = normalizeText(newValue || "");
+  // Normalize for comparison (text normalization + URL domain normalization)
+  let normalizedCurrent = normalizeText(currentValue || "");
+  let normalizedNew = normalizeText(newValue || "");
+  
+  // Also normalize URL domains for environment-agnostic comparison
+  // This prevents false updates when staging URLs vs production URLs are the only difference
+  normalizedCurrent = normalizeUrlDomains(normalizedCurrent);
+  normalizedNew = normalizeUrlDomains(normalizedNew);
 
   // =========================================================================
   // FIELD-SPECIFIC RULES
@@ -189,7 +194,8 @@ function shouldUpdateField(key, currentValue, newValue) {
     const existingKeys = parseAdditionalKeyInfo(currentValue || "");
     const mergedKeys = parseAdditionalKeyInfo(mergedValue);
     
-    if (mergedKeys.size === existingKeys.size && normalizedCurrent === normalizeText(mergedValue)) {
+    const normalizedMerged = normalizeUrlDomains(normalizeText(mergedValue));
+    if (mergedKeys.size === existingKeys.size && normalizedCurrent === normalizedMerged) {
       return { update: false, reason: "additional_key_information: no new keys to add" };
     }
     
@@ -205,7 +211,7 @@ function shouldUpdateField(key, currentValue, newValue) {
     return { update: false, reason: "both values empty" };
   }
 
-  // Skip if values are the same after normalization
+  // Skip if values are the same after normalization (including URL domain normalization)
   if (normalizedCurrent === normalizedNew) {
     return { update: false, reason: "values identical after normalization" };
   }
@@ -280,7 +286,7 @@ function buildUpdatePayload(currentData, candidateData, partNumber, fileKey) {
         changedFields.push(key);
         
         logInfoToFile(
-          `[buildUpdatePayload] ${partNumber}: UPDATE '${key}'\n` +
+          `buildUpdatePayload() – ${partNumber}: UPDATE '${key}'\n` +
           `  Current: "${currentValue?.substring(0, 100)}${currentValue?.length > 100 ? '...' : ''}"\n` +
           `  New: "${(decision.value || newValue)?.substring(0, 100)}${(decision.value || newValue)?.length > 100 ? '...' : ''}"`
         );
@@ -302,7 +308,7 @@ function buildUpdatePayload(currentData, candidateData, partNumber, fileKey) {
     if (currentDesc !== newDesc && candidateData.description) {
       payload.description = candidateData.description;
       changedFields.push("description");
-      logInfoToFile(`[buildUpdatePayload] ${partNumber}: UPDATE 'description'`);
+      logInfoToFile(`buildUpdatePayload() – ${partNumber}: UPDATE 'description'`);
     }
   }
 
@@ -314,7 +320,7 @@ function buildUpdatePayload(currentData, candidateData, partNumber, fileKey) {
     if (currentSku !== newSku && candidateData.sku) {
       payload.sku = candidateData.sku;
       changedFields.push("sku");
-      logInfoToFile(`[buildUpdatePayload] ${partNumber}: UPDATE 'sku'`);
+      logInfoToFile(`buildUpdatePayload() – ${partNumber}: UPDATE 'sku'`);
     }
   }
 
@@ -332,12 +338,12 @@ function buildUpdatePayload(currentData, candidateData, partNumber, fileKey) {
   
   if (hasChanges) {
     logInfoToFile(
-      `[buildUpdatePayload] ${partNumber} in ${fileKey}: ` +
+      `buildUpdatePayload() – ${partNumber} in ${fileKey}: ` +
       `${changedFields.length} field(s) to update: [${changedFields.join(", ")}]`
     );
   } else {
     logInfoToFile(
-      `[buildUpdatePayload] ${partNumber} in ${fileKey}: No changes needed`
+      `buildUpdatePayload() – ${partNumber} in ${fileKey}: No changes needed`
     );
   }
 

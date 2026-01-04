@@ -12,6 +12,7 @@ jest.mock("../ui/services/redis", () => {
 
 const { withRedis } = require("../ui/services/redis");
 const { createApiRouter } = require("../ui/routes/api");
+const { progressKeys } = require("../src/services/queue");
 
 function mkTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "woo-ui-test-"));
@@ -79,10 +80,11 @@ describe("DELETE /api/csv-mappings/:fileKey", () => {
     expect(updatedMappings.files).toEqual([]);
 
     expect(redis.del).toHaveBeenCalledWith([
-      `total-rows:${fileKey}`,
-      `updated-products:${fileKey}`,
-      `skipped-products:${fileKey}`,
-      `failed-products:${fileKey}`,
+      progressKeys.totalRows(fileKey),
+      progressKeys.updatedProducts(fileKey),
+      progressKeys.skippedProducts(fileKey),
+      progressKeys.failedProducts(fileKey),
+      progressKeys.processingProducts(fileKey),
     ]);
 
     const updatedCheckpoint = JSON.parse(fs.readFileSync(checkpointPath, "utf-8"));

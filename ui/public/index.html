@@ -77,7 +77,7 @@
     .page-header-left h1 { font-size: 24px; font-weight: 700; color: var(--color-gray-900); display: flex; align-items: center; gap: var(--space-3); }
     .page-header-left p { color: var(--color-gray-500); font-size: var(--text-sm); margin-top: var(--space-1); }
     .page-header-right { display: flex; gap: var(--space-3); align-items: center; }
-    
+
     /* Cards */
     .card { background: white; border-radius: var(--radius-lg); box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: var(--space-4); overflow: hidden; }
     .card-header { padding: var(--space-4); border-bottom: 1px solid var(--color-gray-100); display: flex; justify-content: space-between; align-items: center; }
@@ -107,17 +107,22 @@
     .form-help { font-size: var(--text-xs); color: var(--color-gray-500); margin-top: var(--space-1); }
     
     /* Log Viewer */
-    .log-viewer { background: var(--color-gray-900); border-radius: var(--radius-lg); overflow: hidden; }
+    .log-viewer { background: var(--color-gray-900); border-radius: var(--radius-lg); overflow: hidden; margin-top: var(--space-4); }
     .log-viewer-header { display: flex; justify-content: space-between; align-items: center; padding: var(--space-3) var(--space-4); background: var(--color-gray-800); border-bottom: 1px solid var(--color-gray-700); flex-wrap: wrap; gap: var(--space-2); }
     .log-viewer-title { font-size: var(--text-sm); font-weight: 600; color: white; display: flex; align-items: center; gap: var(--space-2); }
     .log-viewer-controls { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
-    .log-viewer-body { height: 350px; overflow-y: auto; padding: var(--space-3); font-family: var(--font-mono); font-size: 11px; line-height: 1.6; }
-    .log-line { color: var(--color-gray-300); padding: 2px 0; border-bottom: 1px solid var(--color-gray-800); }
+    .log-viewer-body { height: 400px; overflow-y: auto; padding: var(--space-3); font-family: var(--font-mono); font-size: 11px; line-height: 1.6; }
+    .log-line { color: var(--color-gray-300); padding: 4px 8px; border-bottom: 1px solid var(--color-gray-800); display: flex; align-items: flex-start; gap: 8px; cursor: pointer; user-select: text; }
     .log-line:hover { background: var(--color-gray-800); }
     .log-line.log-error { color: #f87171; }
     .log-line.log-success { color: #4ade80; }
     .log-line.log-warning { color: #fbbf24; }
     .log-line.log-info { color: #60a5fa; }
+    .log-line .log-content { flex: 1; word-break: break-all; }
+    .log-line .log-copy-btn { opacity: 0; background: var(--color-gray-700); border: none; color: var(--color-gray-400); padding: 2px 6px; border-radius: 3px; font-size: 10px; cursor: pointer; flex-shrink: 0; transition: opacity 0.15s; }
+    .log-line:hover .log-copy-btn { opacity: 1; }
+    .log-line .log-copy-btn:hover { background: var(--color-gray-600); color: white; }
+    .log-line .log-copy-btn.copied { background: var(--color-success); color: white; }
     .log-line .env-tag { font-weight: bold; padding: 1px 4px; border-radius: 3px; margin-right: 4px; }
     .log-line .env-tag.prod { background: rgba(220, 38, 38, 0.2); color: #fca5a5; }
     .log-line .env-tag.staging { background: rgba(202, 138, 4, 0.2); color: #fde047; }
@@ -127,7 +132,7 @@
     .log-status-dot.paused { background: var(--color-gray-500); animation: none; }
     
     /* Admin Panel */
-    .admin-panel { background: linear-gradient(135deg, #1e3a5f 0%, #2d1b4e 100%); border-radius: var(--radius-lg); padding: var(--space-4); margin-bottom: var(--space-4); }
+    .admin-panel { display: none; background: linear-gradient(135deg, #1e3a5f 0%, #2d1b4e 100%); border-radius: var(--radius-lg); padding: var(--space-4); margin-bottom: var(--space-4); }
     .admin-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-3); }
     .admin-panel-title { font-size: var(--text-sm); font-weight: 600; color: white; }
     .admin-panel-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
@@ -137,6 +142,9 @@
     .admin-btn-red { background: #ef4444; color: white; }
     .admin-btn-purple { background: #8b5cf6; color: white; }
     .admin-status { font-size: var(--text-xs); color: rgba(255,255,255,0.7); margin-top: var(--space-2); }
+
+    /* System Status Card */
+    .system-status-card { display: none;}
     
     /* Stats Grid */
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: var(--space-3); padding: var(--space-4); }
@@ -166,7 +174,7 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     
     /* Layout */
-    .main-layout { display: grid; grid-template-columns: 1fr 420px; gap: var(--space-6); }
+    .main-layout { display: grid; grid-template-columns: 420px 1fr ; gap: var(--space-6); }
     @media (max-width: 1200px) { .main-layout { grid-template-columns: 1fr; } }
     
     /* File List */
@@ -225,7 +233,7 @@
     
     <header class="page-header">
       <div class="page-header-left">
-        <h1>📦 Woo Product Updater</h1>
+        <h1>Woo Product Updater</h1>
         <p>Upload CSV files, configure mappings, and sync products with WooCommerce</p>
       </div>
       <div class="page-header-right">
@@ -251,6 +259,7 @@
           </script>
         <button type="button" class="btn btn-secondary" onclick="refreshAll()">🔄 Refresh</button>
         <span class="status-badge status-pending" id="run-status-badge" title="Run status">Checking…</span>
+        <button class="admin-btn admin-btn-orange" id="btn-flush-header" onclick="flushRedis()">🗑️ Flush Redis</button>
         <button type="button" class="btn btn-success" id="start-processing-btn" onclick="triggerProcessing()">▶️ Start Processing</button>
       </div>
     </header>
@@ -259,7 +268,7 @@
       <div class="main-content">
         <!-- Upload Card -->
         <div class="card">
-          <div class="card-header"><h2>📤 Upload CSV File</h2></div>
+          <div class="card-header"><h2>Upload CSV File</h2></div>
           <form id="upload-form">
             <div class="form-group">
               <label class="form-label" for="folder">Target Folder (optional)</label>
@@ -270,23 +279,24 @@
               <label class="form-label" for="file">CSV File</label>
               <input type="file" id="file" name="file" accept=".csv" class="form-input" required />
             </div>
-            <button type="submit" class="btn btn-primary">📤 Upload to S3</button>
+            <button type="submit" class="btn btn-primary">Upload to S3</button>
           </form>
         </div>
         
+      </div>
+      
+      <div class="sidebar">
         <!-- Files Card -->
         <div class="card">
           <div class="card-header">
-            <h2>📁 CSV Files Progress</h2>
+            <h2>CSV Files Progress</h2>
             <button type="button" class="btn btn-xs btn-secondary" onclick="loadAndRenderFiles()">🔄</button>
           </div>
           <div class="file-list" id="file-list">
             <p class="text-muted">Loading files...</p>
           </div>
         </div>
-      </div>
-      
-      <div class="sidebar">
+
         <!-- Admin Panel -->
         <div class="admin-panel">
           <div class="admin-panel-header">
@@ -301,37 +311,8 @@
           <div class="admin-status" id="admin-status">Ready</div>
         </div>
         
-        <!-- Log Viewer -->
-        <div class="log-viewer">
-          <div class="log-viewer-header">
-            <div class="log-viewer-title">
-              📋 Live Logs
-              <span class="log-status" id="log-status">
-                <span class="log-status-dot" id="log-status-dot"></span>
-                <span id="log-status-text">Live</span>
-              </span>
-            </div>
-            <div class="log-viewer-controls">
-              <select id="log-type" class="form-select" style="width: auto; padding: 4px 8px; font-size: 11px;">
-                <option value="info">Info Logs</option>
-                <option value="error">Error Logs</option>
-              </select>
-              <select id="log-env-filter" class="form-select" style="width: auto; padding: 4px 8px; font-size: 11px;">
-                <option value="">All Environments</option>
-                <option value="PROD">Production Only</option>
-                <option value="STAGING">Staging Only</option>
-                <option value="DEV">Development Only</option>
-              </select>
-              <button type="button" class="btn btn-xs btn-secondary" onclick="toggleLogPause()" id="btn-pause-logs">⏸️</button>
-              <button type="button" class="btn btn-xs btn-secondary" onclick="clearLogs()">🗑️</button>
-              <button type="button" class="btn btn-xs btn-secondary" onclick="fetchLogs()">🔄</button>
-            </div>
-          </div>
-          <div class="log-viewer-body" id="log-viewer-body"><div class="log-line">Waiting for logs...</div></div>
-        </div>
-        
         <!-- System Status -->
-        <div class="card mt-4">
+        <div class="card system-status-card">
           <div class="card-header">
             <h2>⚙️ System Status</h2>
             <button type="button" class="btn btn-xs btn-secondary" onclick="fetchSystemStatus()">🔄</button>
@@ -349,6 +330,35 @@
         </div>
 
       </div>
+    </div>
+    
+    <!-- Log Viewer (Full Width) -->
+    <div class="log-viewer">
+      <div class="log-viewer-header">
+        <div class="log-viewer-title">
+          Live Logs
+          <span class="log-status" id="log-status">
+            <span class="log-status-dot" id="log-status-dot"></span>
+            <span id="log-status-text">Live</span>
+          </span>
+        </div>
+        <div class="log-viewer-controls">
+          <select id="log-type" class="form-select" style="width: auto; padding: 4px 8px; font-size: 11px;">
+            <option value="info">Info Logs</option>
+            <option value="error">Error Logs</option>
+          </select>
+          <select id="log-env-filter" class="form-select" style="width: auto; padding: 4px 8px; font-size: 11px;">
+            <option value="">All Environments</option>
+            <option value="PROD">Production Only</option>
+            <option value="STAGING">Staging Only</option>
+            <option value="DEV">Development Only</option>
+          </select>
+          <button type="button" class="btn btn-xs btn-secondary" onclick="toggleLogPause()" id="btn-pause-logs">⏸️</button>
+          <button type="button" class="btn btn-xs btn-secondary" onclick="clearLogViewer()" title="Clear log viewer">🗑️</button>
+          <button type="button" class="btn btn-xs btn-secondary" onclick="resumeAndFetchLogs()" title="Refresh logs">🔄</button>
+        </div>
+      </div>
+      <div class="log-viewer-body" id="log-viewer-body"><div class="log-line"><span class="log-content">Waiting for logs...</span></div></div>
     </div>
   </div>
   
@@ -416,9 +426,11 @@
     
     let logPaused = false;
     let currentEnv = { mode: 'unknown', label: 'UNKNOWN', bucket: '' };
+    let rawLogsCache = []; // Store raw logs for copy functionality
 
     let lastMappings = null;
     let lastProgress = {};
+    let lastQueueCounts = { waiting: 0, active: 0, delayed: 0 };
     let mappingModalState = { fileKey: null, status: null };
     
     // ==========================================================================
@@ -576,13 +588,32 @@
         container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 20px;">No files uploaded yet</p>';
         return;
       }
+      
+      // Check if queue has active work (more reliable than per-row processing counter)
+      const queueActive = (lastQueueCounts.waiting + lastQueueCounts.active + lastQueueCounts.delayed) > 0;
+      
       container.innerHTML = validFiles.map(file => {
         const status = effectiveFileStatus(file);
         const stats = normalizeProgressStats(lastProgress?.[file.fileKey]);
         const completedPct = Math.min(100, Math.max(0, Number(stats.percentage) || 0));
-        const processingPct = stats.totalRows > 0 ? Math.min(100, Math.round(((stats.completed + stats.processing) / stats.totalRows) * 100)) : 0;
+        
+        // Show processing bar if: explicit processing count OR queue is active and file not complete
+        const isFileComplete = stats.completed >= stats.totalRows && stats.totalRows > 0;
+        const showProcessing = stats.processing > 0 || (queueActive && !isFileComplete && stats.totalRows > 0);
+        
+        // Estimate processing percentage: use processing count, or if queue active, show small "activity" bar ahead
+        let processingPct = completedPct;
+        if (stats.processing > 0 && stats.totalRows > 0) {
+          processingPct = Math.min(100, Math.round(((stats.completed + stats.processing) / stats.totalRows) * 100));
+        } else if (showProcessing && completedPct < 100) {
+          // Show a small "lookahead" to indicate activity (at least 2% ahead or to next batch boundary)
+          processingPct = Math.min(100, completedPct + Math.max(2, Math.ceil(20 / stats.totalRows * 100)));
+        }
+        
         const hasProgress = (Number(stats.totalRows) || 0) > 0;
-        const isActive = stats.processing > 0;
+
+        // Show queue jobs indicator when queue is active
+        const queueJobsText = queueActive ? ` (${lastQueueCounts.active} active, ${lastQueueCounts.waiting} waiting)` : '';
 
         const progressHtml = `
           <div style="margin-top: 8px;">
@@ -595,7 +626,7 @@
                 ? `
                   <span class="progress-pill" style="font-weight: 600;">${completedPct}%</span>
                   <span class="progress-pill">Total: ${stats.totalRows.toLocaleString()}</span>
-                  ${isActive ? `<span class="progress-pill" style="background: #fef3c7; color: #b45309;">⏳ Processing: ${stats.processing.toLocaleString()}</span>` : ''}
+                  ${showProcessing ? `<span class="progress-pill" style="background: #fef3c7; color: #b45309;">⏳ Working${queueJobsText}</span>` : ''}
                   <span class="progress-pill" style="background: #dcfce7; color: #15803d;">✓ Updated: ${stats.updated.toLocaleString()}</span>
                   <span class="progress-pill">Skipped: ${stats.skipped.toLocaleString()}</span>
                   ${stats.failed > 0 ? `<span class="progress-pill" style="background: #fee2e2; color: #dc2626;">✗ Failed: ${stats.failed.toLocaleString()}</span>` : `<span class="progress-pill">Failed: 0</span>`}
@@ -620,16 +651,16 @@
             </div>
           </div>
           <div class="file-actions">
-            <button class="btn btn-xs btn-secondary" onclick="openMappingModal('${file.fileKey}')">🧩 Map</button>
+            <button class="btn btn-xs btn-secondary" onclick="openMappingModal('${file.fileKey}')" title="Configure column mapping">Map</button>
             ${mappingComplete
-              ? `<button class="btn btn-xs btn-primary" onclick="setFileStatus('${file.fileKey}', 'ready')">✅ Ready</button>`
-              : `<button class="btn btn-xs btn-primary" onclick="openMappingModal('${file.fileKey}')" title="Set mapping to enable READY">✅ Ready</button>`
+              ? `<button class="btn btn-xs btn-primary" onclick="setFileStatus('${file.fileKey}', 'ready')" title="Mark file ready for processing">✅ Ready</button>`
+              : `<button class="btn btn-xs btn-primary" onclick="openMappingModal('${file.fileKey}')" title="Set mapping first to enable READY">✅ Ready</button>`
             }
             ${hasProgress
-              ? `<button class="btn btn-xs btn-danger" title="Clear Progress" onclick="removeProgress('${file.fileKey}')">🧹</button>`
+              ? `<button class="btn btn-xs btn-secondary" title="Clear progress counters only (keeps file record)" onclick="removeProgress('${file.fileKey}')" style="background: #fef3c7; border-color: #fbbf24;">🧹</button>`
               : ``
             }
-            <button class="btn btn-xs btn-danger" onclick="deleteFile('${file.fileKey}')">🗑️</button>
+            <button class="btn btn-xs btn-danger" onclick="deleteFile('${file.fileKey}')" title="Delete file record AND progress permanently">🗑️</button>
           </div>
         </div>
       `;
@@ -744,15 +775,21 @@
     }
     
     async function deleteFile(fileKey) {
-      showModal('Delete File', `Are you sure you want to delete ${fileKey}?`, async () => {
-        try {
-          await apiRequest(`${CONFIG.API.MAPPINGS}/${encodeURIComponent(fileKey)}`, { method: 'DELETE' });
-          showToast('File deleted', 'success');
-          loadAndRenderFiles();
-        } catch (err) {
-          showToast('Failed to delete file', 'error');
-        }
-      }, 'Delete', 'btn-danger');
+      showModal(
+        '🗑️ Delete File Record',
+        `This will permanently remove "${fileKey}" from the list AND clear all its progress data. This action cannot be undone. Continue?`,
+        async () => {
+          try {
+            await apiRequest(`${CONFIG.API.MAPPINGS}/${encodeURIComponent(fileKey)}`, { method: 'DELETE' });
+            showToast('File record and progress deleted', 'success');
+            loadAndRenderFiles();
+          } catch (err) {
+            showToast('Failed to delete file', 'error');
+          }
+        },
+        'Delete Permanently',
+        'btn-danger'
+      );
     }
     
     // ==========================================================================
@@ -761,10 +798,30 @@
     document.getElementById('upload-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const form = e.target;
+      const submitBtn = form.querySelector('button[type="submit"]');
+      const originalText = submitBtn.textContent;
       const formData = new FormData(form);
       
+      // Get file size for progress indication
+      const file = form.querySelector('input[type="file"]').files[0];
+      const fileSizeMB = file ? (file.size / (1024 * 1024)).toFixed(1) : 0;
+      
+      // Disable button and show uploading state
+      submitBtn.disabled = true;
+      submitBtn.textContent = `Uploading ${fileSizeMB}MB...`;
+      
       try {
-        const res = await fetch(CONFIG.API.UPLOAD, { method: 'POST', body: formData });
+        // Use AbortController for timeout (5 minutes for large files)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+        
+        const res = await fetch(CONFIG.API.UPLOAD, { 
+          method: 'POST', 
+          body: formData,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
         const data = await res.json();
         if (data.success) {
           showToast(`Uploaded: ${data.fileKey}`, 'success');
@@ -774,7 +831,14 @@
           throw new Error(data.error || 'Upload failed');
         }
       } catch (err) {
-        showToast('Upload failed: ' + err.message, 'error');
+        if (err.name === 'AbortError') {
+          showToast('Upload timed out - file may still be uploading. Check file list.', 'warning');
+        } else {
+          showToast('Upload failed: ' + err.message, 'error');
+        }
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
       }
     });
     
@@ -812,18 +876,25 @@
     // RUN STATUS + PROGRESS
     // ==========================================================================
     async function removeProgress(fileKey) {
-      if (!confirm(`Remove progress for ${fileKey}?`)) return;
-      try {
-        await apiRequest(`/api/progress/${encodeURIComponent(fileKey)}`, { method: 'DELETE' });
-        showToast('Progress removed', 'success');
-        // Update local cache immediately
-        if (lastProgress && typeof lastProgress === 'object') {
-          delete lastProgress[fileKey];
-        }
-        fetchRunStatus();
-      } catch (err) {
-        showToast('Failed to remove progress', 'error');
-      }
+      showModal(
+        'Clear Progress Only',
+        `This will clear the progress counters for "${fileKey}" but keep the file record. The file will remain in the list and can be re-processed. Continue?`,
+        async () => {
+          try {
+            await apiRequest(`/api/progress/${encodeURIComponent(fileKey)}`, { method: 'DELETE' });
+            showToast('Progress cleared (file record kept)', 'success');
+            // Update local cache immediately
+            if (lastProgress && typeof lastProgress === 'object') {
+              delete lastProgress[fileKey];
+            }
+            fetchRunStatus();
+          } catch (err) {
+            showToast('Failed to clear progress', 'error');
+          }
+        },
+        'Clear Progress',
+        'btn-warning'
+      );
     }
     
     async function fetchRunStatus() {
@@ -833,7 +904,11 @@
           await loadAndRenderFiles();
         }
 
-        const data = await apiRequest('/api/run-status');
+        // Fetch both run-status and progress (for queue counts)
+        const [data, progressData] = await Promise.all([
+          apiRequest('/api/run-status'),
+          apiRequest('/api/progress').catch(() => ({ progress: {}, queue: {} }))
+        ]);
 
         const badge = document.getElementById('run-status-badge');
         const btn = document.getElementById('start-processing-btn');
@@ -854,7 +929,9 @@
           badge.title = (data.reasons || []).join(' | ') || 'Blocked';
         }
 
-        lastProgress = data.progress || {};
+        lastProgress = data.progress || progressData.progress || {};
+        lastQueueCounts = progressData.queue || { waiting: 0, active: 0, delayed: 0 };
+        
         // Keep the CSV list progress bars in sync.
         if (lastMappings?.files) renderFiles(lastMappings.files);
       } catch (err) {
@@ -884,7 +961,9 @@
     async function flushRedis() {
       showModal('Flush Redis', 'This will clear all Redis data including progress. Continue?', async () => {
         const btn = document.getElementById('btn-flush');
-        setLoading(btn, true);
+        const btnHeader = document.getElementById('btn-flush-header');
+        if (btn) setLoading(btn, true);
+        if (btnHeader) setLoading(btnHeader, true);
         setAdminStatus('Flushing Redis...');
         try {
           const result = await apiRequest(`${CONFIG.API.ADMIN}/flush-redis`, { method: 'POST' });
@@ -895,7 +974,8 @@
           showToast('Flush failed: ' + err.message, 'error');
           setAdminStatus('Flush failed');
         } finally {
-          setLoading(btn, false);
+          if (btn) setLoading(btn, false);
+          if (btnHeader) setLoading(btnHeader, false);
         }
       }, 'Flush Redis', 'btn-warning');
     }
@@ -970,13 +1050,23 @@
       }
     }
     
+    // Helper to escape HTML entities to prevent XSS and rendering issues
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
     function renderLogs(logs) {
       const container = document.getElementById('log-viewer-body');
       const prevScrollTop = container.scrollTop;
       const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
       const wasNearBottom = distanceFromBottom < 40;
 
-      container.innerHTML = logs.map(log => {
+      // Store raw logs for copy functionality
+      rawLogsCache = logs.slice();
+
+      container.innerHTML = logs.map((log, index) => {
         let lineClass = 'log-line';
         let isPermanentFail = log.includes('FAILED permanently after');
         if (isPermanentFail) lineClass += ' log-error log-failed-permanent';
@@ -985,8 +1075,9 @@
         else if (log.includes('⚠️') || log.includes('Warning') || log.includes('Skipping')) lineClass += ' log-warning';
         else if (log.includes('🚀') || log.includes('Processing') || log.includes('🔄')) lineClass += ' log-info';
 
-        // Highlight environment tags
-        let formattedLog = log
+        // Escape HTML entities first to prevent XSS and unwanted link rendering
+        let formattedLog = escapeHtml(log)
+          // Then highlight environment tags (safe spans)
           .replace(/\[PROD\]/g, '<span class="env-tag prod">[PROD]</span>')
           .replace(/\[STAGING\]/g, '<span class="env-tag staging">[STAGING]</span>')
           .replace(/\[DEV\]/g, '<span class="env-tag dev">[DEV]</span>');
@@ -996,7 +1087,10 @@
           formattedLog += ' <span style="background:#ef4444;color:#fff;padding:2px 6px;border-radius:6px;font-size:11px;margin-left:8px;">PERMANENT FAILURE</span>';
         }
 
-        return `<div class="${lineClass}">${formattedLog}</div>`;
+        return `<div class="${lineClass}" data-log-index="${index}">
+          <span class="log-content">${formattedLog}</span>
+          <button class="log-copy-btn" onclick="copyLogLine(this, event)" title="Copy this line">📋</button>
+        </div>`;
       }).join('');
 
       // Only auto-scroll when user is already at (or near) the bottom.
@@ -1026,18 +1120,93 @@
       }
     }
     
+    function resumeAndFetchLogs() {
+      logPaused = false;
+      const dot = document.getElementById('live-dot');
+      const text = document.getElementById('live-text');
+      const btn = document.getElementById('btn-pause-logs');
+      if (dot) dot.classList.remove('paused');
+      if (text) text.textContent = 'Live';
+      if (btn) btn.textContent = '⏸️';
+      fetchLogs();
+    }
+    
+    function copyLogLine(btn, event) {
+      event.stopPropagation();
+      const logLine = btn.closest('.log-line');
+      const logIndex = parseInt(logLine.dataset.logIndex, 10);
+      const originalLog = rawLogsCache[logIndex] || '';
+      
+      if (!originalLog) {
+        showToast('Log not found', 'error');
+        return;
+      }
+      
+      // Use clipboard API with fallback
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(originalLog).then(() => {
+          btn.classList.add('copied');
+          btn.textContent = '✓';
+          setTimeout(() => {
+            btn.classList.remove('copied');
+            btn.textContent = '📋';
+          }, 1500);
+        }).catch(() => {
+          fallbackCopy(originalLog, btn);
+        });
+      } else {
+        fallbackCopy(originalLog, btn);
+      }
+    }
+    
+    function fallbackCopy(text, btn) {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        btn.classList.add('copied');
+        btn.textContent = '✓';
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          btn.textContent = '📋';
+        }, 1500);
+      } catch (err) {
+        showToast('Failed to copy', 'error');
+      }
+    }
+    
     async function clearLogViewer() {
-      // Also clear logs on backend for selected env/type
+      // Clear logs on backend for selected env/type
       const envFilter = document.getElementById('log-env-filter').value;
       const type = document.getElementById('log-type').value;
       try {
-        await fetch(`/api/logs/clear?type=${encodeURIComponent(type)}&env=${encodeURIComponent(envFilter)}`, { method: 'POST' });
-        showToast('Logs cleared', 'success');
+        const response = await fetch(`/api/logs/clear?type=${encodeURIComponent(type)}&env=${encodeURIComponent(envFilter)}`, { method: 'POST' });
+        const result = await response.json();
+        showToast(result.message || 'Logs cleared', 'success');
       } catch (err) {
-        showToast('Failed to clear logs', 'error');
+        showToast('Failed to clear logs: ' + err.message, 'error');
       }
-      document.getElementById('log-viewer-body').innerHTML = '<div class="log-line">Log viewer cleared</div>';
-      fetchLogs();
+      // Clear the raw logs cache and UI
+      rawLogsCache = [];
+      document.getElementById('log-viewer-body').innerHTML = '<div class="log-line"><span class="log-content">Log viewer cleared. New logs will appear shortly...</span></div>';
+      
+      // Brief pause to let the backend clear take effect, then resume
+      logPaused = true;
+      setTimeout(() => {
+        logPaused = false;
+        // Update UI to show live status
+        const dot = document.getElementById('live-dot');
+        const text = document.getElementById('live-text');
+        const btn = document.getElementById('btn-pause-logs');
+        if (dot) dot.classList.remove('paused');
+        if (text) text.textContent = 'Live';
+        if (btn) btn.textContent = '⏸️';
+      }, 2000);
     }
     
     // ==========================================================================
@@ -1069,9 +1238,15 @@
       setInterval(fetchEnvironment, 30000); // Refresh environment every 30s
       setInterval(loadAndRenderFiles, 30000); // keep status/mappings fresh
       
-      // Trigger log refresh on filter change
-      document.getElementById('log-type').addEventListener('change', fetchLogs);
-      document.getElementById('log-env-filter').addEventListener('change', fetchLogs);
+      // Trigger log refresh on filter change (also resumes if paused)
+      document.getElementById('log-type').addEventListener('change', () => {
+        logPaused = false;
+        fetchLogs();
+      });
+      document.getElementById('log-env-filter').addEventListener('change', () => {
+        logPaused = false;
+        fetchLogs();
+      });
     });
 
     // Make sure inline onclick handlers always resolve (some deployments wrap scripts).
@@ -1081,6 +1256,7 @@
       triggerProcessing,
       setFileStatus,
       deleteFile,
+      removeProgress,
       openMappingModal,
       closeMappingModal,
       saveMappingModal,
@@ -1091,9 +1267,11 @@
       fetchLogs,
       toggleLogPause,
       clearLogViewer,
+      copyLogLine,
       fetchSystemStatus,
       fetchRunStatus,
       closeModal,
+      resumeAndFetchLogs,
     });
   </script>
 </body>

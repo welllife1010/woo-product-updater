@@ -44,8 +44,11 @@ function createUiConfig(env = process.env) {
     mappingsPath: path.join(repoRoot, "csv-mappings.json"),
     outputDir: path.join(repoRoot, "output-files"),
 
-    // Support both legacy and current checkpoint locations
+    // Environment-specific checkpoint files to prevent cross-environment pollution
     checkpointPaths: [
+      path.join(repoRoot, `process_checkpoint_${executionMode}.json`),
+      path.join(repoRoot, "src", "batch", `process_checkpoint_${executionMode}.json`),
+      // Legacy fallback paths (for migration)
       path.join(repoRoot, "process_checkpoint.json"),
       path.join(repoRoot, "src", "batch", "process_checkpoint.json"),
     ],

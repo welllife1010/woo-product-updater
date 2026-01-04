@@ -44,7 +44,7 @@
 // =============================================================================
 
 // Redis client for progress tracking
-const { appRedis } = require("../services/queue");
+const { appRedis, progressKeys } = require("../services/queue");
 
 // Logging utilities
 const { logInfoToFile, logErrorToFile } = require("../utils/logger");
@@ -258,7 +258,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   // =========================================================================
   // Track batch processing start - increment processing counter for batch size
   // =========================================================================
-  await appRedis.incrBy(`processing-products:${fileKey}`, batch.length);
+  await appRedis.incrBy(progressKeys.processingProducts(fileKey), batch.length);
 
   for (let i = 0; i < batch.length; i++) {
     const item = batch[i];
@@ -274,7 +274,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       // Decrement processing counter for remaining unprocessed rows
       const remainingRows = batch.length - i;
       if (remainingRows > 0) {
-        await appRedis.decrBy(`processing-products:${fileKey}`, remainingRows);
+        await appRedis.decrBy(progressKeys.processingProducts(fileKey), remainingRows);
       }
       break;
     }
@@ -287,8 +287,6 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       failedParts.push(
         `Row ${currentIndex + 1}: Missing part_number - skipped`
       );
-      // Decrement processing counter - this row is now complete (failed)
-      await appRedis.decr(`processing-products:${fileKey}`);
       continue;
     }
 
@@ -542,15 +540,19 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   /**
    * Increment global counters in Redis for progress tracking.
    * These are used by the UI and checkpointing system.
+   * 
+   * Also decrement processing counter for skipped and failed rows.
+   * (Updated rows are decremented in executeBatchUpdate after API success)
    */
   if (skipCount > 0) {
-    await appRedis.incrBy(`skipped-products:${fileKey}`, skipCount);
+    await appRedis.incrBy(progressKeys.skippedProducts(fileKey), skipCount);
     // Decrement processing counter for skipped rows
-    await appRedis.decrBy(`processing-products:${fileKey}`, skipCount);
+    await appRedis.decrBy(progressKeys.processingProducts(fileKey), skipCount);
   }
   if (localFailCount > 0) {
-    await appRedis.incrBy(`failed-products:${fileKey}`, localFailCount);
-    // Note: failed rows already decremented processing counter individually
+    await appRedis.incrBy(progressKeys.failedProducts(fileKey), localFailCount);
+    // Decrement processing counter for failed rows
+    await appRedis.decrBy(progressKeys.processingProducts(fileKey), localFailCount);
   }
 
   // =========================================================================

@@ -17,7 +17,7 @@ const pinoPretty = require("pino-pretty");
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
-const { appRedis } = require('../services/queue');
+const { appRedis, progressKeys } = require('../services/queue');
 
 // Track files already logged as complete (prevents spam)
 const completedFilesLogged = new Set();
@@ -54,10 +54,15 @@ const ENV_LABEL = getEnvLabel(appEnv);
 
 // NOTE: logger.js lives in src/utils; output-files is at repo root.
 // src/utils -> src -> repo root
-const progressFilePath = path.join(__dirname, "..", "..", "output-files", "update-progress.txt");
-const errorFilePath = path.join(__dirname, "..", "..", "output-files", "error-log.txt");
-const infoFilePath = path.join(__dirname, "..", "..", "output-files", "info-log.txt");
-const updatesFilePath = path.join(__dirname, "..", "..", "output-files", "updates-log.txt");
+// 
+// ENVIRONMENT ISOLATION:
+// Each environment writes to its own log files to prevent cross-environment
+// log pollution when switching between staging/production.
+const outputDir = path.join(__dirname, "..", "..", "output-files");
+const progressFilePath = path.join(outputDir, `update-progress-${appEnv}.txt`);
+const errorFilePath = path.join(outputDir, `error-log-${appEnv}.txt`);
+const infoFilePath = path.join(outputDir, `info-log-${appEnv}.txt`);
+const updatesFilePath = path.join(outputDir, `updates-log-${appEnv}.txt`);
 
 // =============================================================================
 // LOG ROTATION CONFIGURATION
@@ -205,7 +210,7 @@ const logUpdatesToFile = (message) => {
  */
 const logProgressToFile = async () => {
   try {
-    const fileKeys = await appRedis.keys("total-rows:*");
+    const fileKeys = await appRedis.keys(progressKeys.totalRowsPattern());
   
     if (fileKeys.length === 0) {
       console.log(`[${getPSTTimestamp()}] [${ENV_LABEL}] No progress to log.`);
@@ -216,13 +221,13 @@ const logProgressToFile = async () => {
     let allFilesComplete = true;
 
     for (const key of fileKeys) {
-      // Robust fileKey extraction (handles colons in filename)
-      const fileKey = key.replace(/^total-rows:/, "");
+      // Robust fileKey extraction using progressKeys helper
+      const fileKey = progressKeys.extractFileKey(key);
 
-      const totalRows = parseInt(await appRedis.get(`total-rows:${fileKey}`) || 0, 10);
-      const updated = parseInt(await appRedis.get(`updated-products:${fileKey}`) || 0, 10);
-      const skipped = parseInt(await appRedis.get(`skipped-products:${fileKey}`) || 0, 10);
-      const failed = parseInt(await appRedis.get(`failed-products:${fileKey}`) || 0, 10);
+      const totalRows = parseInt(await appRedis.get(progressKeys.totalRows(fileKey)) || 0, 10);
+      const updated = parseInt(await appRedis.get(progressKeys.updatedProducts(fileKey)) || 0, 10);
+      const skipped = parseInt(await appRedis.get(progressKeys.skippedProducts(fileKey)) || 0, 10);
+      const failed = parseInt(await appRedis.get(progressKeys.failedProducts(fileKey)) || 0, 10);
 
       const completed = updated + skipped + failed;
       const progress = totalRows > 0 ? Math.round((completed / totalRows) * 100) : 0;

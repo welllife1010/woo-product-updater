@@ -12,6 +12,7 @@ jest.mock("../ui/services/redis", () => {
 
 const { withRedis } = require("../ui/services/redis");
 const { createApiRouter } = require("../ui/routes/api");
+const { progressKeys } = require("../src/services/queue");
 
 function mkTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "woo-ui-test-"));
@@ -80,10 +81,11 @@ describe("DELETE /api/progress/:fileKey", () => {
 
     expect(redis.del).toHaveBeenCalledTimes(1);
     expect(redis.del).toHaveBeenCalledWith([
-      `total-rows:${fileKey}`,
-      `updated-products:${fileKey}`,
-      `skipped-products:${fileKey}`,
-      `failed-products:${fileKey}`,
+      progressKeys.totalRows(fileKey),
+      progressKeys.updatedProducts(fileKey),
+      progressKeys.skippedProducts(fileKey),
+      progressKeys.failedProducts(fileKey),
+      progressKeys.processingProducts(fileKey),
     ]);
 
     const updatedCheckpoint = JSON.parse(fs.readFileSync(checkpointPath, "utf-8"));
@@ -91,7 +93,7 @@ describe("DELETE /api/progress/:fileKey", () => {
     expect(updatedCheckpoint).toHaveProperty("other");
 
     expect(res.body.checkpointFilesUpdated).toBe(1);
-    expect(res.body.deletedKeys).toBe(4);
+    expect(res.body.deletedKeys).toBe(5);
   });
 
   test("succeeds even when checkpoint files are missing", async () => {

@@ -45,7 +45,7 @@ const path = require("path");
 const { logErrorToFile, logInfoToFile } = require("../utils/logger");
 
 // Redis and queue access
-const { batchQueue, appRedis } = require("../services/queue");
+const { batchQueue, appRedis, progressKeys, CURRENT_ENV } = require("../services/queue");
 
 // =============================================================================
 // CONFIGURATION
@@ -54,8 +54,12 @@ const { batchQueue, appRedis } = require("../services/queue");
 /**
  * Path to the checkpoint JSON file.
  * This file persists progress across system restarts.
+ * 
+ * ENVIRONMENT ISOLATION:
+ * Each environment (production/staging/development) has its own checkpoint file
+ * to prevent cross-environment data pollution.
  */
-const checkpointFilePath = path.join(__dirname, "process_checkpoint.json");
+const checkpointFilePath = path.join(__dirname, `process_checkpoint_${CURRENT_ENV}.json`);
 
 // =============================================================================
 // INITIALIZATION
@@ -66,7 +70,7 @@ const checkpointFilePath = path.join(__dirname, "process_checkpoint.json");
  * This prevents "file not found" errors on first run.
  */
 if (!fs.existsSync(checkpointFilePath)) {
-  logInfoToFile(`⚠️ process_checkpoint.json not found. Creating empty file.`);
+  logInfoToFile(`⚠️ process_checkpoint_${CURRENT_ENV}.json not found. Creating empty file.`);
   fs.writeFileSync(checkpointFilePath, JSON.stringify({}, null, 2));
 }
 
@@ -100,7 +104,7 @@ if (!fs.existsSync(checkpointFilePath)) {
  */
 async function saveCheckpoint(fileKey, lastProcessedRow, totalRows) {
   logInfoToFile(
-    `🔍 saveCheckpoint() called: fileKey=${fileKey}, ` +
+    `saveCheckpoint() called – fileKey=${fileKey}, ` +
     `lastProcessedRow=${lastProcessedRow}, totalRows=${totalRows}`
   );
 
@@ -157,9 +161,9 @@ async function saveCheckpoint(fileKey, lastProcessedRow, totalRows) {
   let failed = 0;
 
   try {
-    updated = parseInt(await appRedis.get(`updated-products:${fileKey}`) || "0", 10);
-    skipped = parseInt(await appRedis.get(`skipped-products:${fileKey}`) || "0", 10);
-    failed = parseInt(await appRedis.get(`failed-products:${fileKey}`) || "0", 10);
+    updated = parseInt(await appRedis.get(progressKeys.updatedProducts(fileKey)) || "0", 10);
+    skipped = parseInt(await appRedis.get(progressKeys.skippedProducts(fileKey)) || "0", 10);
+    failed = parseInt(await appRedis.get(progressKeys.failedProducts(fileKey)) || "0", 10);
   } catch (redisError) {
     logErrorToFile(`⚠️ Redis read error in saveCheckpoint: ${redisError.message}`);
     // Continue with zeros - better to save partial data than nothing

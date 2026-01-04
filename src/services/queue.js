@@ -10,11 +10,17 @@
  *   and DO NOT create real BullMQ Queue connections.
  *   Instead, we export lightweight "fake" objects so tests can import
  *   this module without requiring a live Redis server.
+ * 
+ * ENVIRONMENT ISOLATION:
+ * - All Redis keys are prefixed with the environment (staging/production/development)
+ * - This prevents data from one environment bleeding into another when
+ *   switching environments on the same server.
  */
 
 
 const { Queue, QueueEvents } = require("bullmq");
 const { createClient } = require("redis");
+const { resolveAppEnv } = require("../config/runtime-env");
 
 // ---------------------------------------------
 // 0) Detect environment (normal vs Jest tests)
@@ -43,9 +49,12 @@ const {
   REDIS_PASSWORD,
   REDIS_URL_APP,           // optional full URL for app Redis client
   BULLMQ_PREFIX = "bull",
-  APP_KEY_PREFIX = "woo_updater:",
   QUEUE_NAME = "batchQueue",
 } = process.env;
+
+// Resolve current environment and create environment-specific key prefix
+const CURRENT_ENV = resolveAppEnv();
+const APP_KEY_PREFIX = `woo_updater:${CURRENT_ENV}:`;
 
 const USE_TLS = String(REDIS_TLS).toLowerCase() === "true";
 
@@ -105,7 +114,7 @@ const appRedis = createClient({ url: appRedisUrl });
 appRedis.on("error", (err) => console.error("[appRedis] ❌", err));
 appRedis.on("connect", () => console.log("[appRedis] ⚙️  Connecting..."));
 appRedis.on("ready", () =>
-  console.log("[appRedis] ✅ Ready:", appRedisUrl)
+  console.log(`[appRedis] ✅ Ready (env=${CURRENT_ENV}, keyPrefix="${APP_KEY_PREFIX}"):`, appRedisUrl)
 );
 appRedis.on("end", () => console.log("[appRedis] ⛔ Disconnected"));
 
@@ -267,14 +276,69 @@ if (!isTestEnv) {
 /**
  * @function appKey
  * @description Prefixes our application keys so all our Redis entries
- * live under a consistent namespace, e.g.:
+ * live under a consistent namespace that includes the environment, e.g.:
  *   appKey("total-rows:filename.csv")
  * becomes:
- *   "woo_updater:total-rows:filename.csv"
+ *   "woo_updater:production:total-rows:filename.csv"
+ * or
+ *   "woo_updater:staging:total-rows:filename.csv"
+ * 
+ * This ensures each environment has its own isolated set of Redis keys.
  */
 function appKey(shortKey) {
   return `${APP_KEY_PREFIX}${shortKey}`;
 }
+
+// ---------------------------------------------
+// 6) Standard progress key helpers
+// ---------------------------------------------
+
+/**
+ * Standard key names for file processing progress tracking.
+ * Use these functions instead of hardcoding key names to ensure
+ * environment isolation is consistent across all files.
+ */
+const progressKeys = {
+  totalRows: (fileKey) => appKey(`total-rows:${fileKey}`),
+  updatedProducts: (fileKey) => appKey(`updated-products:${fileKey}`),
+  skippedProducts: (fileKey) => appKey(`skipped-products:${fileKey}`),
+  failedProducts: (fileKey) => appKey(`failed-products:${fileKey}`),
+  processingProducts: (fileKey) => appKey(`processing-products:${fileKey}`),
+  
+  /**
+   * Get all standard progress keys for a file
+   * @param {string} fileKey - The file identifier
+   * @returns {object} Object containing all progress key names
+   */
+  allKeys: (fileKey) => ({
+    totalRows: progressKeys.totalRows(fileKey),
+    updated: progressKeys.updatedProducts(fileKey),
+    skipped: progressKeys.skippedProducts(fileKey),
+    failed: progressKeys.failedProducts(fileKey),
+    processing: progressKeys.processingProducts(fileKey),
+  }),
+  
+  /**
+   * Pattern to match all total-rows keys for the current environment
+   * Used with redis.keys() to find all tracked files
+   */
+  totalRowsPattern: () => appKey("total-rows:*"),
+  
+  /**
+   * Extract the fileKey from a full Redis key
+   * @param {string} fullKey - The full Redis key (e.g., "woo_updater:production:total-rows:file.csv")
+   * @returns {string} The extracted fileKey (e.g., "file.csv")
+   */
+  extractFileKey: (fullKey) => {
+    const prefix = appKey("total-rows:");
+    if (fullKey.startsWith(prefix)) {
+      return fullKey.slice(prefix.length);
+    }
+    // Fallback for legacy keys without environment prefix
+    const match = fullKey.match(/total-rows:(.+)$/);
+    return match ? match[1] : fullKey;
+  },
+};
 
 module.exports = {
   // Job system
@@ -287,5 +351,7 @@ module.exports = {
   // Our KV client + key helpers
   appRedis,
   APP_KEY_PREFIX,
+  CURRENT_ENV,
   appKey,
+  progressKeys,
 };

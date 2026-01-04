@@ -8,7 +8,7 @@ WHY HERE?
 ================================================================================
 */
 
-const { appRedis } = require("../services/queue");
+const { appRedis, progressKeys } = require("../services/queue");
 const { wooApi } = require("../services/woo-helpers");
 const { scheduleApiRequest } = require("../services/job-manager");
 const { logErrorToFile, logInfoToFile } = require("../utils/logger");
@@ -90,10 +90,10 @@ async function executeBatchUpdate(toUpdate, fileKey, MAX_RETRIES) {
       );
 
       const updatedCount = response.data?.update?.length || 0;
-      await appRedis.incrBy(`updated-products:${fileKey}`, updatedCount);
+      await appRedis.incrBy(progressKeys.updatedProducts(fileKey), updatedCount);
       // Decrement processing counter for successfully updated products
       if (updatedCount > 0) {
-        await appRedis.decrBy(`processing-products:${fileKey}`, updatedCount);
+        await appRedis.decrBy(progressKeys.processingProducts(fileKey), updatedCount);
       }
       return; // success
     } catch (err) {
