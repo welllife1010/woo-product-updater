@@ -37,19 +37,25 @@ ENV="${1:-staging}"
 
 if [ "$ENV" == "production" ]; then
     # ⚠️  PRODUCTION - BE CAREFUL!
-    EC2_HOST="18.144.155.64"  # TODO: Replace with actual IP
+    EC2_HOST="18.144.155.64"
     EC2_USER="ubuntu"
     APP_DIR="/home/ubuntu/woo-product-update"
     PM2_ENV="production"
 elif [ "$ENV" == "staging" ]; then
-    # ✅ STAGING - Safe for testing
-    EC2_HOST="18.144.155.64"  # TODO: Replace with actual IP
+    # ✅ STAGING - Safe for testing (separate EC2 instance)
+    EC2_HOST="3.101.70.202"
     EC2_USER="ubuntu"
     APP_DIR="/home/ubuntu/woo-product-update"
     PM2_ENV="staging"
+elif [ "$ENV" == "development" ]; then
+    # ✅ DEVELOPMENT - Also uses staging server but --env development
+    EC2_HOST="3.101.70.202"
+    EC2_USER="ubuntu"
+    APP_DIR="/home/ubuntu/woo-product-update"
+    PM2_ENV="development"
 else
     echo "❌ Unknown environment: $ENV"
-    echo "Usage: ./scripts/deploy.sh [staging|production]"
+    echo "Usage: ./scripts/deploy.sh [staging|production|development]"
     exit 1
 fi
 

@@ -431,6 +431,7 @@
     let lastMappings = null;
     let lastProgress = {};
     let lastQueueCounts = { waiting: 0, active: 0, delayed: 0 };
+    let lastMissingProducts = {}; // Map of folderName -> { totalProducts, categories }
     let mappingModalState = { fileKey: null, status: null };
     
     // ==========================================================================
@@ -535,14 +536,44 @@
     // ==========================================================================
     async function loadAndRenderFiles() {
       try {
-        const data = await apiRequest(CONFIG.API.MAPPINGS);
-        lastMappings = data;
-        const files = data.files || [];
+        // Fetch both mappings and missing products in parallel
+        const [mappingsData, missingData] = await Promise.all([
+          apiRequest(CONFIG.API.MAPPINGS),
+          apiRequest('/api/missing-products').catch(() => ({ folders: [] }))
+        ]);
+        
+        lastMappings = mappingsData;
+        
+        // Build missing products lookup: CSV filename -> folder info
+        lastMissingProducts = {};
+        for (const folder of (missingData.folders || [])) {
+          // Match folder name to fileKey (e.g., "Accuris-Full-Data-Report" matches "test-uploads/Accuris Full Data Report.csv")
+          lastMissingProducts[folder.folderName] = folder;
+        }
+        
+        const files = mappingsData.files || [];
         renderFiles(files);
       } catch (err) {
         console.error('Failed to load files:', err);
         showToast('Failed to load files', 'error');
       }
+    }
+    
+    // Convert fileKey to missing products folder name format
+    function fileKeyToMissingFolder(fileKey) {
+      // Extract filename without path and extension, convert to dash format
+      const basename = fileKey.split('/').pop().replace(/\.csv$/i, '');
+      return basename
+        .replace(/[^a-zA-Z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .trim();
+    }
+    
+    // Get missing products info for a file
+    function getMissingProductsForFile(fileKey) {
+      const folderName = fileKeyToMissingFolder(fileKey);
+      return lastMissingProducts[folderName] || null;
     }
 
     function isMappingComplete(mapping) {
@@ -639,6 +670,11 @@
         `;
 
         const mappingComplete = isMappingComplete(file.mapping);
+        
+        // Check if this file has missing products
+        const missingInfo = getMissingProductsForFile(file.fileKey);
+        const hasMissingProducts = missingInfo && missingInfo.totalProducts > 0;
+        const missingFolderName = fileKeyToMissingFolder(file.fileKey);
 
         return `
         <div class="file-item">
@@ -648,6 +684,13 @@
               <span class="status-badge status-${status}">${status}</span>
               <span class="form-help" style="display:block;margin-top:6px;">${mappingSummary(file.mapping)}</span>
               ${progressHtml}
+              ${hasMissingProducts ? `
+                <div style="margin-top: 6px;">
+                  <span class="progress-pill" style="background: #fef3c7; color: #92400e;">
+                    ⚠️ ${missingInfo.totalProducts} missing products (${missingInfo.categories.length} categories)
+                  </span>
+                </div>
+              ` : ''}
             </div>
           </div>
           <div class="file-actions">
@@ -655,6 +698,10 @@
             ${mappingComplete
               ? `<button class="btn btn-xs btn-primary" onclick="setFileStatus('${file.fileKey}', 'ready')" title="Mark file ready for processing">✅ Ready</button>`
               : `<button class="btn btn-xs btn-primary" onclick="openMappingModal('${file.fileKey}')" title="Set mapping first to enable READY">✅ Ready</button>`
+            }
+            ${hasMissingProducts
+              ? `<button class="btn btn-xs btn-secondary" onclick="createMissingProducts('${missingFolderName}')" title="Create ${missingInfo.totalProducts} missing products in WooCommerce" style="background: #dbeafe; border-color: #3b82f6; color: #1d4ed8;">➕ Create Missing</button>`
+              : ``
             }
             ${hasProgress
               ? `<button class="btn btn-xs btn-secondary" title="Clear progress counters only (keeps file record)" onclick="removeProgress('${file.fileKey}')" style="background: #fef3c7; border-color: #fbbf24;">🧹</button>`
@@ -789,6 +836,40 @@
         },
         'Delete Permanently',
         'btn-danger'
+      );
+    }
+    
+    // ==========================================================================
+    // CREATE MISSING PRODUCTS
+    // ==========================================================================
+    async function createMissingProducts(folderName) {
+      const missingInfo = lastMissingProducts[folderName];
+      const categoryList = missingInfo?.categories?.map(c => `${c.name} (${c.count})`).join(', ') || 'unknown';
+      
+      showModal(
+        '➕ Create Missing Products',
+        `This will create ${missingInfo?.totalProducts || 0} missing products in WooCommerce from "${folderName}".\n\nCategories: ${categoryList}\n\n⚠️ This may take a while and will make changes to your WooCommerce store. Continue?`,
+        async () => {
+          try {
+            showToast(`Starting creation of ${missingInfo?.totalProducts || 0} products...`, 'info');
+            
+            const res = await fetch(`/api/missing-products/${encodeURIComponent(folderName)}/create`, {
+              method: 'POST'
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+              showToast(`✅ Created ${data.created} products, ${data.failed} failed`, data.failed > 0 ? 'warning' : 'success');
+              loadAndRenderFiles(); // Refresh to update missing products count
+            } else {
+              throw new Error(data.error || 'Creation failed');
+            }
+          } catch (err) {
+            showToast('Failed to create missing products: ' + err.message, 'error');
+          }
+        },
+        'Create Products',
+        'btn-primary'
       );
     }
     

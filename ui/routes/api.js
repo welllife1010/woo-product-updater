@@ -685,6 +685,78 @@ function createApiRouter(config) {
     }
   });
 
+  // ---- Missing Products: List folders with missing products
+  router.get("/missing-products", (req, res) => {
+    try {
+      const { listMissingProductFolders } = require("../../src/missing-products/create-missing-products");
+      const folders = listMissingProductFolders();
+      res.json({ success: true, folders });
+    } catch (err) {
+      console.error(`[missing-products] Error listing: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Missing Products: Get details for a specific CSV folder
+  router.get("/missing-products/:folderName", (req, res) => {
+    try {
+      const { folderName } = req.params;
+      const missingProductsDir = path.join(config.paths.rootDir || path.join(__dirname, "../.."), "missing-products", folderName);
+      
+      if (!fs.existsSync(missingProductsDir)) {
+        return res.status(404).json({ error: `Folder not found: ${folderName}` });
+      }
+      
+      const categoryFolders = fs.readdirSync(missingProductsDir)
+        .filter(name => name.startsWith("missing-") && fs.statSync(path.join(missingProductsDir, name)).isDirectory());
+      
+      const categories = categoryFolders.map(catFolder => {
+        const jsonPath = path.join(missingProductsDir, catFolder, "missing_products.json");
+        let products = [];
+        if (fs.existsSync(jsonPath)) {
+          try {
+            products = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+          } catch (e) { /* ignore */ }
+        }
+        return {
+          name: catFolder.replace("missing-", ""),
+          count: products.length,
+          products: products.slice(0, 10) // Preview first 10
+        };
+      });
+      
+      res.json({ success: true, folderName, categories });
+    } catch (err) {
+      console.error(`[missing-products] Error getting details: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Missing Products: Create missing products for a CSV folder
+  router.post("/missing-products/:folderName/create", async (req, res) => {
+    try {
+      const { folderName } = req.params;
+      const { processMissingProducts } = require("../../src/missing-products/create-missing-products");
+      
+      console.log(`[missing-products] Starting creation for ${folderName}...`);
+      
+      const results = await processMissingProducts(folderName);
+      
+      console.log(`[missing-products] Completed: ${results.created} created, ${results.failed} failed`);
+      
+      res.json({ 
+        success: true, 
+        folderName,
+        created: results.created,
+        failed: results.failed,
+        categories: results.categories
+      });
+    } catch (err) {
+      console.error(`[missing-products] Error creating: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
 
