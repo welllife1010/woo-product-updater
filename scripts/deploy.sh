@@ -37,7 +37,7 @@ ENV="${1:-staging}"
 
 if [ "$ENV" == "production" ]; then
     # ⚠️  PRODUCTION - BE CAREFUL!
-    EC2_HOST="18.144.155.64"
+    EC2_HOST="50.18.169.235"
     EC2_USER="ubuntu"
     APP_DIR="/home/ubuntu/woo-product-update"
     PM2_ENV="production"
@@ -99,7 +99,7 @@ rsync -avz \
     --exclude 'logs' \
     --exclude 'output-files' \
     --exclude 'batch_status' \
-    --exclude 'missing-products' \
+    --exclude '/missing-products' \
     --exclude 'tmp-uploads' \
     --exclude 'process_checkpoint.json' \
     --exclude 'csv-mappings.json' \

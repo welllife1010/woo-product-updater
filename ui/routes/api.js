@@ -13,8 +13,12 @@ const {
   clearLogs,
 } = require("../services/log-files");
 const { createS3Client, uploadCsvToS3, getCsvHeadersFromS3 } = require("../services/s3");
-const { restartApp } = require("../services/pm2");
+const { restartApp, restartAppQuantityOnly, restartAppFullMode } = require("../services/pm2");
 const { getQueueActivityCounts, isQueueRunning } = require("../services/bullmq-inspector");
+const { 
+  listMissingProductFolders, 
+  processMissingProducts 
+} = require("../../src/missing-products/create-missing-products");
 
 const {
   validateCanStartFromMappings,
@@ -518,6 +522,148 @@ function createApiRouter(config) {
     }
   });
 
+  // ---- Trigger quantity-only processing (UPDATE_MODE=quantity)
+  router.post("/trigger-processing/quantity-only", async (req, res) => {
+    try {
+      const mappings = readMappings(config.paths.mappingsPath);
+
+      // Check if already running
+      let alreadyRunning = false;
+      try {
+        const counts = await getQueueActivityCounts();
+        alreadyRunning = isQueueRunning(counts);
+      } catch (err) {
+        const progress = await withRedis(config.redisUrl, async (redis) => {
+          const fileKeys = await redis.keys(progressKeys.totalRowsPattern());
+          const out = {};
+          for (const key of fileKeys) {
+            const fk = progressKeys.extractFileKey(key);
+            const totalRows = parseInt((await redis.get(progressKeys.totalRows(fk))) || 0, 10);
+            const updated = parseInt((await redis.get(progressKeys.updatedProducts(fk))) || 0, 10);
+            const skipped = parseInt((await redis.get(progressKeys.skippedProducts(fk))) || 0, 10);
+            const failed = parseInt((await redis.get(progressKeys.failedProducts(fk))) || 0, 10);
+            const completed = updated + skipped + failed;
+            out[fk] = { totalRows, updated, skipped, failed, completed };
+          }
+          return out;
+        });
+        alreadyRunning = isRunActiveFromProgress(progress);
+      }
+
+      if (alreadyRunning) {
+        return res.status(409).json({
+          success: false,
+          error: "Processing is already running",
+          environment: config.envLabel,
+        });
+      }
+
+      const validation = validateCanStartFromMappings(mappings);
+      if (!validation.ok) {
+        return res.status(400).json({
+          success: false,
+          error: "Cannot start processing: missing required mappings",
+          reasons: validation.reasons,
+          environment: config.envLabel,
+        });
+      }
+
+      // For quantity-only mode, check that all ready files have quantity mapping
+      const readyFiles = (mappings.files || []).filter(f => f.status === "ready" || 
+        (f.status === "pending" && f.mapping && typeof f.mapping === "object" &&
+          f.mapping.partNumber?.trim() && f.mapping.manufacturer?.trim() && f.mapping.category?.trim()));
+      
+      const filesWithoutQuantity = readyFiles.filter(f => 
+        !f.mapping?.quantity || !String(f.mapping.quantity).trim()
+      );
+
+      if (filesWithoutQuantity.length > 0) {
+        const fileNames = filesWithoutQuantity.map(f => f.fileKey).join(', ');
+        return res.status(400).json({
+          success: false,
+          error: "Quantity-only mode requires quantity column mapping",
+          reasons: [`Missing quantity mapping for: ${fileNames}`],
+          environment: config.envLabel,
+        });
+      }
+
+      // Auto-promote pending files with complete mappings
+      let promoted = 0;
+      const now = new Date().toISOString();
+      for (const f of mappings.files || []) {
+        if (f && f.status === "pending" && f.mapping && typeof f.mapping === "object") {
+          const mapped =
+            typeof f.mapping.partNumber === "string" && f.mapping.partNumber.trim() &&
+            typeof f.mapping.manufacturer === "string" && f.mapping.manufacturer.trim() &&
+            typeof f.mapping.category === "string" && f.mapping.category.trim();
+          if (mapped) {
+            f.status = "ready";
+            f.updatedAt = now;
+            promoted += 1;
+          }
+        }
+      }
+
+      if (promoted > 0) {
+        writeMappings(config.paths.mappingsPath, mappings);
+      }
+
+      // For quantity-only mode, clear progress and checkpoints for all ready files
+      // This ensures files get re-processed even if they were previously completed
+      const filesToProcess = (mappings.files || []).filter(f => f.status === "ready");
+      let progressCleared = 0;
+      
+      for (const file of filesToProcess) {
+        const fileKey = file.fileKey;
+        try {
+          // Clear Redis progress
+          await withRedis(config.redisUrl, async (redis) => {
+            const keys = progressKeys.allKeys(fileKey);
+            await redis.del([
+              keys.totalRows,
+              keys.updated,
+              keys.skipped,
+              keys.failed,
+              keys.processing,
+            ]);
+          });
+
+          // Clear checkpoint entries
+          for (const checkpointPath of config.paths.checkpointPaths || []) {
+            try {
+              if (!checkpointPath || !fs.existsSync(checkpointPath)) continue;
+              const raw = fs.readFileSync(checkpointPath, "utf-8") || "{}";
+              const json = JSON.parse(raw);
+              if (json && Object.prototype.hasOwnProperty.call(json, fileKey)) {
+                delete json[fileKey];
+                fs.writeFileSync(checkpointPath, JSON.stringify(json, null, 2));
+              }
+            } catch (e) {
+              console.error(`[trigger/quantity-only] Failed to clear checkpoint for ${fileKey}: ${e.message}`);
+            }
+          }
+          
+          progressCleared++;
+          console.log(`[trigger/quantity-only] Cleared progress for: ${fileKey}`);
+        } catch (e) {
+          console.error(`[trigger/quantity-only] Failed to clear progress for ${fileKey}: ${e.message}`);
+        }
+      }
+
+      console.log(`[trigger] [${config.envLabel}] Triggering QUANTITY-ONLY processing (cleared ${progressCleared} file(s) progress)...`);
+      await restartAppQuantityOnly();
+      res.json({
+        success: true,
+        message: `Quantity-only processing triggered (cleared progress for ${progressCleared} file(s))`,
+        mode: "quantity",
+        environment: config.envLabel,
+      });
+    } catch (err) {
+      console.error(`[trigger/quantity-only] Error: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ---- Run status (mapping readiness + running indicator)
   router.get("/run-status", async (req, res) => {
     try {
@@ -688,8 +834,8 @@ function createApiRouter(config) {
   // ---- Missing Products: List folders with missing products
   router.get("/missing-products", (req, res) => {
     try {
-      const { listMissingProductFolders } = require("../../src/missing-products/create-missing-products");
-      const folders = listMissingProductFolders();
+      const rootDir = config.paths.rootDir || path.join(__dirname, "../..");
+      const folders = listMissingProductFolders(rootDir);
       res.json({ success: true, folders });
     } catch (err) {
       console.error(`[missing-products] Error listing: ${err.message}`);
@@ -736,7 +882,6 @@ function createApiRouter(config) {
   router.post("/missing-products/:folderName/create", async (req, res) => {
     try {
       const { folderName } = req.params;
-      const { processMissingProducts } = require("../../src/missing-products/create-missing-products");
       
       console.log(`[missing-products] Starting creation for ${folderName}...`);
       

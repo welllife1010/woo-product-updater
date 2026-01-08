@@ -22,7 +22,7 @@ FIELD PROTECTION RULES:
 ================================================================================
 */
 
-const { logInfoToFile } = require("../utils/logger");
+const { logInfoToFile, logUpdatesToFile } = require("../utils/logger");
 const { normalizeText, normalizeUrlDomains } = require("./text-utils");
 const { 
   mergeAdditionalKeyInfo, 
@@ -368,21 +368,35 @@ function buildQuantityOnlyPayload(currentData, candidateData, productId, partNum
   const newMeta = Array.isArray(candidateData?.meta_data) ? candidateData.meta_data : [];
   
   const currentQty = currentMeta.find((m) => m?.key === "quantity")?.value || "0";
+  const currentGenQty = currentMeta.find((m) => m?.key === "_generated_quantity")?.value || "0";
   const newQty = newMeta.find((m) => m?.key === "quantity")?.value || "0";
 
-  if (currentQty === newQty) {
-    logInfoToFile(`[buildQuantityOnlyPayload] ${partNumber}: quantity unchanged (${currentQty})`);
+  // Check if BOTH quantity and _generated_quantity match the new value
+  // If either is different, we need to update
+  const qtyChanged = currentQty !== newQty;
+  const genQtyChanged = currentGenQty !== newQty;
+
+  if (!qtyChanged && !genQtyChanged) {
+    logInfoToFile(`[QUANTITY] ${partNumber}: unchanged (qty=${currentQty}, _generated_qty=${currentGenQty})`);
     return { payload: null, changed: false };
   }
 
-  logInfoToFile(
-    `[buildQuantityOnlyPayload] ${partNumber}: quantity ${currentQty} → ${newQty}`
-  );
+  // Log what's changing
+  const changes = [];
+  if (qtyChanged) changes.push(`quantity: ${currentQty} → ${newQty}`);
+  if (genQtyChanged) changes.push(`_generated_quantity: ${currentGenQty} → ${newQty}`);
+  
+  const changeMsg = `[QUANTITY] ${partNumber}: ${changes.join(', ')}`;
+  logInfoToFile(changeMsg);
+  logUpdatesToFile(changeMsg);
 
   return {
     payload: {
       id: productId,
-      meta_data: [{ key: "quantity", value: String(newQty) }],
+      meta_data: [
+        { key: "quantity", value: String(newQty) },
+        { key: "_generated_quantity", value: String(newQty) },
+      ],
     },
     changed: true,
   };

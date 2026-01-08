@@ -72,6 +72,9 @@ const { resolveCategory } = require("../resolvers/category-map");
 const { ensureCategoryHierarchy } = require("../resolvers/category-woo");
 const { log } = require("util");
 
+// Runtime update mode (can be changed without restart)
+const { getUpdateMode } = require("../config/update-mode");
+
 // =============================================================================
 // CONFIGURATION
 // =============================================================================
@@ -198,8 +201,10 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
    * UPDATE_MODE determines what data we update:
    *   - "quantity": Only update stock quantity (faster, less API load)
    *   - "full": Update all fields (name, description, categories, etc.)
+   * 
+   * Uses runtime config file (can be changed without restart) with env fallback.
    */
-  const updateMode = process.env.UPDATE_MODE || "full";
+  const updateMode = getUpdateMode();
 
   logInfoToFile(
     `processBatch() - Starting | ` +
@@ -570,6 +575,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
   logInfoToFile(
     `processBatch() - ✅ Completed | ` +
+    `Mode: ${updateMode} | ` +
     `Rows: ${startIndex}-${startIndex + batch.length - 1} | ` +
     `Updates queued: ${toUpdate.length} | ` +
     `Skipped: ${skipCount} | ` +

@@ -47,6 +47,7 @@ THE FIX:
 
 const { logger, logInfoToFile, logErrorToFile } = require("../utils/logger");
 const { normalizeText, isCurrentMetaMissing, isMetaValueDifferent } = require("./text-utils");
+const { getUpdateMode } = require("../config/update-mode");
 
 /**
  * List of meta_data keys we track for comparison.
@@ -169,7 +170,7 @@ const isUpdateNeeded = (currentData, newData, _currentIndex, _total, partNumber,
     return false;
   }
 
-  const updateMode = process.env.UPDATE_MODE || "full";
+  const updateMode = getUpdateMode();
   const fieldsToUpdate = [];
   logInfoToFile(`[ isUpdateNeeded() ] - Checking for updates for Part Number: ${partNumber} in ${fileName}`);
 

@@ -122,6 +122,12 @@ const enqueueBatchesFromCsvStream = async ({
             normalizedData.part_number = normalizedData[partKeySafe];
             normalizedData.category = normalizedData[categoryKeySafe];
             normalizedData.manufacturer = normalizedData[manufacturerKeySafe];
+
+            // Apply quantity mapping if provided (e.g., "On Hand Stock" -> quantity)
+            if (mapping.quantity) {
+              const quantityKeySafe = normalizeHeaderKey(mapping.quantity);
+              normalizedData.quantity = normalizedData[quantityKeySafe];
+            }
           }
 
           // Mapping should win, but still backfill any missing canonical keys

@@ -22,6 +22,8 @@ const { buildUpdatePayload, buildQuantityOnlyPayload } = require("./build-update
 * @returns {boolean} true if we queued an update; false if skipped.
 */
 function handleQuantityUpdate(newData, currentData, toUpdate, productId, item) {
+  logInfoToFile(`[QUANTITY UPDATE] Processing ${item.part_number} (ID: ${productId})`);
+  
   const { payload, changed } = buildQuantityOnlyPayload(
     currentData, 
     newData, 
@@ -30,13 +32,14 @@ function handleQuantityUpdate(newData, currentData, toUpdate, productId, item) {
   );
 
   if (!changed || !payload) {
-    logInfoToFile(`🔎 Skipping ${item.part_number}, quantity unchanged`);
+    logInfoToFile(`[QUANTITY UPDATE] ⏭️ Skipping ${item.part_number}, quantity unchanged`);
     return false;
   }
 
   // Add manufacturer for reference
   payload.manufacturer = item.manufacturer;
   toUpdate.push(payload);
+  logInfoToFile(`[QUANTITY UPDATE] ✅ Queued ${item.part_number} for quantity update`);
   return true;
 }
 
@@ -80,6 +83,13 @@ async function executeBatchUpdate(toUpdate, fileKey, MAX_RETRIES) {
     return;
   }
 
+  // Log the payload being sent for debugging
+  logInfoToFile(`[BATCH UPDATE] Sending ${toUpdate.length} products to WooCommerce`);
+  for (const item of toUpdate) {
+    const metaKeys = (item.meta_data || []).map(m => `${m.key}=${m.value}`).join(', ');
+    logInfoToFile(`[BATCH UPDATE] Product ID ${item.id}: meta_data=[${metaKeys}]`);
+  }
+
   let attempts = 0;
   while (attempts < MAX_RETRIES) {
     try {
@@ -90,6 +100,8 @@ async function executeBatchUpdate(toUpdate, fileKey, MAX_RETRIES) {
       );
 
       const updatedCount = response.data?.update?.length || 0;
+      logInfoToFile(`[BATCH UPDATE] WooCommerce response: ${updatedCount} products updated`);
+      
       await appRedis.incrBy(progressKeys.updatedProducts(fileKey), updatedCount);
       // Decrement processing counter for successfully updated products
       if (updatedCount > 0) {

@@ -12,6 +12,8 @@ SCOPE:
 
 const { normalizeText } = require("./text-utils");
 const Fuse = require("fuse.js");
+const { logInfoToFile } = require("../utils/logger");
+const { getUpdateMode } = require("../config/update-mode");
 
 // Map raw normalized CSV headers -> canonical keys your code uses everywhere
 const FIELD_ALIASES = {
@@ -292,7 +294,7 @@ const mergeAdditionalKeyInfo = (existingHtml, newHtml) => {
 * `additional_key_information` from leftover fields (merging with existing).
 */
 const createNewData = (item, productId, part_number, currentData = null) => {
-  const updateMode = process.env.UPDATE_MODE || "full";
+  const updateMode = getUpdateMode();
   const normalizedCsvRow = normalizeCsvHeaders(item);
   const row = applyAliases(normalizedCsvRow);
 
@@ -303,14 +305,18 @@ const createNewData = (item, productId, part_number, currentData = null) => {
   ""; 
 
   if (updateMode === "quantity") {
+    const qtyValue = row.quantity || row.quantity_available || "0";
+    logInfoToFile(
+      `[QUANTITY MODE] Creating quantity-only payload for ${row.part_number || part_number}: qty=${qtyValue}`
+    );
     return {
         id: productId,
         part_number: row.part_number || part_number,
         manufacturer: row.manufacturer || "",
-        meta_data: [{
-        key: "quantity",
-        value: row.quantity || row.quantity_available || "0"
-        }],
+        meta_data: [
+          { key: "quantity", value: qtyValue },
+          { key: "_generated_quantity", value: qtyValue },
+        ],
     };
     }
 

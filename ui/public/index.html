@@ -261,6 +261,7 @@
         <span class="status-badge status-pending" id="run-status-badge" title="Run status">Checking…</span>
         <button class="admin-btn admin-btn-orange" id="btn-flush-header" onclick="flushRedis()">🗑️ Flush Redis</button>
         <button type="button" class="btn btn-success" id="start-processing-btn" onclick="triggerProcessing()">▶️ Start Processing</button>
+        <button type="button" class="btn btn-primary" id="start-quantity-btn" onclick="triggerQuantityOnly()" title="Update quantity only (faster)">📦 Qty Only</button>
       </div>
     </header>
     
@@ -396,6 +397,10 @@
       <div class="form-group">
         <label class="form-label" for="mapping-category">Category column</label>
         <select id="mapping-category" class="form-select"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="mapping-quantity">Quantity column <span style="color: var(--color-gray-400); font-weight: normal;">(optional for full update, required for qty-only)</span></label>
+        <select id="mapping-quantity" class="form-select"></select>
       </div>
 
       <div class="modal-actions">
@@ -591,7 +596,8 @@
       const pn = mapping.partNumber ? `PN: ${mapping.partNumber}` : 'PN: -';
       const m = mapping.manufacturer ? `Mfr: ${mapping.manufacturer}` : 'Mfr: -';
       const c = mapping.category ? `Cat: ${mapping.category}` : 'Cat: -';
-      return `${pn} | ${m} | ${c}`;
+      const q = mapping.quantity ? `Qty: ${mapping.quantity}` : '';
+      return `${pn} | ${m} | ${c}${q ? ' | ' + q : ''}`;
     }
 
     function effectiveFileStatus(file) {
@@ -778,6 +784,7 @@
         setSelectOptions(document.getElementById('mapping-partNumber'), headers, current.partNumber);
         setSelectOptions(document.getElementById('mapping-manufacturer'), headers, current.manufacturer);
         setSelectOptions(document.getElementById('mapping-category'), headers, current.category);
+        setSelectOptions(document.getElementById('mapping-quantity'), headers, current.quantity);
 
         document.getElementById('mapping-modal-overlay').classList.remove('hidden');
       } catch (err) {
@@ -795,6 +802,7 @@
           partNumber: document.getElementById('mapping-partNumber').value,
           manufacturer: document.getElementById('mapping-manufacturer').value,
           category: document.getElementById('mapping-category').value,
+          quantity: document.getElementById('mapping-quantity').value,
         };
 
         if (!isMappingComplete(mapping)) {
@@ -953,6 +961,33 @@
       }
     }
 
+    async function triggerQuantityOnly() {
+      const btn = document.getElementById('start-quantity-btn');
+      setLoading(btn, true);
+      try {
+        const res = await fetch('/api/trigger-processing/quantity-only', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          if (data?.reasons?.length) {
+            showToast(data.reasons.join(' | '), 'warning');
+          } else if (data?.error) {
+            showToast(data.error, 'error');
+          } else {
+            showToast('Failed to start quantity-only processing', 'error');
+          }
+          return;
+        }
+
+        showToast(data.message || 'Quantity-only processing started', 'success');
+        fetchRunStatus();
+      } catch (err) {
+        showToast('Failed to start quantity-only processing: ' + err.message, 'error');
+      } finally {
+        setLoading(btn, false);
+      }
+    }
+
     // ==========================================================================
     // RUN STATUS + PROGRESS
     // ==========================================================================
@@ -993,19 +1028,23 @@
 
         const badge = document.getElementById('run-status-badge');
         const btn = document.getElementById('start-processing-btn');
+        const qtyBtn = document.getElementById('start-quantity-btn');
 
         if (data.running) {
           badge.className = 'status-badge status-processing';
           badge.textContent = 'RUNNING';
           btn.disabled = true;
+          qtyBtn.disabled = true;
         } else if (data.canStart) {
           badge.className = 'status-badge status-ready';
           badge.textContent = 'READY';
           btn.disabled = false;
+          qtyBtn.disabled = false;
         } else {
           badge.className = 'status-badge status-pending';
           badge.textContent = 'BLOCKED';
           btn.disabled = true;
+          qtyBtn.disabled = true;
           // Tooltip for quick diagnosis.
           badge.title = (data.reasons || []).join(' | ') || 'Blocked';
         }
