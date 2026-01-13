@@ -24,10 +24,7 @@ FIELD PROTECTION RULES:
 
 const { logInfoToFile, logUpdatesToFile } = require("../utils/logger");
 const { normalizeText, normalizeUrlDomains } = require("./text-utils");
-const { 
-  mergeAdditionalKeyInfo, 
-  parseAdditionalKeyInfo 
-} = require("./map-new-data");
+const { mergeAdditionalKeyInfo, parseAdditionalKeyInfo } = require("./map-new-data");
 
 /**
  * List of meta_data keys we track for updates.

@@ -15,37 +15,76 @@ const Fuse = require("fuse.js");
 const { logInfoToFile } = require("../utils/logger");
 const { getUpdateMode } = require("../config/update-mode");
 
-// Map raw normalized CSV headers -> canonical keys your code uses everywhere
+/*
+ * ============================================================================
+ * FIELD_ALIASES: Vendor CSV column names → Canonical internal keys
+ * ============================================================================
+ * 
+ * This runs FIRST to normalize all the different column names vendors use.
+ * 
+ * Example flow:
+ *   CSV has "Stock Quantity" column
+ *   → normalizeCsvHeaders() → "stock_quantity"
+ *   → applyAliases() → "quantity"  ← FIELD_ALIASES does this
+ *   → metaDataKeyMap → "quantity"  ← Then maps to ACF field (often same name)
+ */
 const FIELD_ALIASES = {
-  // Column 1/2 name variants
+  // Part number variants
   "manufacturer_part_number": "part_number",
   "mfr_part_number": "part_number",
 
-  // Description variants (column 2 may be any of these)
+  // Description variants
   "product_description": "part_description",
   "short_product_description": "short_description",
   "detailed_product_description": "detail_description",
 
-  // New or variant spec names
-  "stock_quantity": "quantity",          // ACF "quantity"
-  "quantity_available": "quantity",      // keep existing
-  "voltage": "voltage",                  // keep it canonical
-  "operating_temperature": "operating_temperature",
-  "supplier_device_package": "supplier_device_package",
-  "packaging": "packaging",              // new
-  "rohs_compliance": "rohs_status",
-  "reach_compliance": "reach_status",
-  "hts_code": "htsus_code",
-  "eccn": "export_control_class_number",
-  "moisture_sensitivity_level": "moisture_sensitivity_level",
+  // Quantity variants → canonical "quantity"
+  "stock_quantity": "quantity",
+  "quantity_available": "quantity",
 
-  // URL field variants (after asterisk removal)
+  // Compliance variants → canonical status fields
+  "rohs_compliance": "rohs_status",
+  "rohsstatus": "rohs_status",
+  "reach_compliance": "reach_status",
+  "reachstatus": "reach_status",
+
+  // Export/customs variants
+  "hts_code": "htsus_code",
+  "htsuscode": "htsus_code",
+  "eccn": "export_control_class_number",
+  "exportcontrolclassnumber": "export_control_class_number",
+
+  // Moisture sensitivity variants
+  "moisturesensitivitylevel": "moisture_sensitivity_level",
+
+  // Lead time variants
+  "leadtime": "manufacturer_lead_weeks",
+
+  // URL field variants
   "datasheet_url": "datasheet",
   "image_attachment_url": "image_url",
-  "image_url": "image_url"
+
+  // PCN variants
+  "pcn_design": "pcn_design_specification",
+  "pcn_assembly": "pcn_assembly_origin",
+
+  // Environmental info variants
+  "environmental_info": "environmental_information"
 };
 
-// Apply aliases before mapping
+/**
+ * @function applyAliases
+ * @description Converts vendor-specific CSV column names to canonical internal keys.
+ * Runs after normalizeCsvHeaders() and before metaDataKeyMap.
+ * 
+ * @param {Object} normalizedRow - Row with lowercase, underscored keys
+ * @returns {Object} Row with vendor variations replaced by canonical names
+ * 
+ * @example
+ * applyAliases({ stock_quantity: "100" })        // → { quantity: "100" }
+ * applyAliases({ rohs_compliance: "Compliant" }) // → { rohs_status: "Compliant" }
+ * applyAliases({ voltage: "3.3V" })              // → { voltage: "3.3V" } (no alias, passes through)
+ */
 const applyAliases = (normalizedRow) => {
   const out = {};
   for (const [k, v] of Object.entries(normalizedRow)) {
@@ -318,65 +357,66 @@ const createNewData = (item, productId, part_number, currentData = null) => {
           { key: "_generated_quantity", value: qtyValue },
         ],
     };
-    }
+  }
 
-  // 1) Map CSV → meta_data known keys
+  /*
+   * ============================================================================
+   * metaDataKeyMap: Canonical internal keys → WooCommerce ACF field names
+   * ============================================================================
+   * 
+   * This runs AFTER applyAliases(), so we only need canonical keys here.
+   * Most mappings are 1:1 (same name), but some differ.
+   * 
+   * Example:
+   *   "voltage_supply" (from CSV like "Voltage / Supply") → "voltage" (ACF field)
+   *   "package_case" (from CSV like "Package / Case") → "package" (ACF field)
+   */
   const metaDataKeyMap = {
+    // Basic info
     manufacturer: "manufacturer",
-    leadtime: "manufacturer_lead_weeks",
-    image_url: "image_url",
     series: "series",
-
-    // Quantity – support both old and new
-    quantity_available: "quantity",
+    
+    // Quantity (already canonical after aliases)
     quantity: "quantity",
 
-    operating_temperature: "operating_temperature",
-
-    // Voltage – support both old and new
+    // Voltage - normalized header still comes through as voltage_supply
     voltage_supply: "voltage",
     voltage: "voltage",
 
-    // Packaging / package
+    // Package - normalized header still comes through as package_case
     package_case: "package",
     packaging: "packaging",
 
-    supplier_device_package: "supplier_device_package",
-    mounting_type: "mounting_type",
+    // Descriptions
     short_description: "short_description",
     part_description: "detail_description",
 
-    // Compliance / statuses – support both old and new
-    reachstatus: "reach_status",
+    // Technical specs (1:1 mappings)
+    operating_temperature: "operating_temperature",
+    supplier_device_package: "supplier_device_package",
+    mounting_type: "mounting_type",
+
+    // Compliance (already canonical after aliases)
     reach_status: "reach_status",
-    rohsstatus: "rohs_status",
     rohs_status: "rohs_status",
-
-    moisturesensitivitylevel: "moisture_sensitivity_level",
     moisture_sensitivity_level: "moisture_sensitivity_level",
-
-    exportcontrolclassnumber: "export_control_class_number",
     export_control_class_number: "export_control_class_number",
-
-    htsuscode: "htsus_code",
     htsus_code: "htsus_code",
 
-    // Basic Product Info
+    // Lead time (already canonical after aliases)
     manufacturer_lead_weeks: "manufacturer_lead_weeks",
 
     // Document & Media
+    image_url: "image_url",
     pcn_design_specification: "pcn_design_specification",
-    pcn_design: "pcn_design_specification",
     pcn_assembly_origin: "pcn_assembly_origin",
-    pcn_assembly: "pcn_assembly_origin",
     pcn_packaging: "pcn_packaging",
     html_datasheet: "html_datasheet",
     eda_models: "eda_models",
 
-    // Environmental Info (general)
+    // Environmental
     environmental_information: "environmental_information",
-    environmental_info: "environmental_information",
-    };
+  };
 
   const productMetaData = Object.keys(metaDataKeyMap)
     .filter((csvKey) => Object.prototype.hasOwnProperty.call(row, csvKey))
