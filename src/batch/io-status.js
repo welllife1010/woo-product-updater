@@ -10,7 +10,7 @@ WHY A SEPARATE FILE?
 
 const fs = require("fs");
 const path = require("path");
-const { logErrorToFile, logInfoToFile } = require("../../logger");
+const { logErrorToFile, logInfoToFile } = require("../utils/logger");
 
 /**
 * @typedef {Object} BatchStatus
@@ -82,17 +82,17 @@ const recordBatchStatus = (fileKey, updatedParts, skippedParts, failedParts) => 
  *   The caller (fetchProductData) is responsible for figuring out:
  *     - which leafCategorySlug (Woo-style slug) this row belongs to.
  *
- *   Grouping:
- *     ./missing-products/missing-[leafCategorySlug]/missing_products_[cleanFileKey].json
+ *   Grouping (NEW STRUCTURE):
+ *     ./missing-products/[CSV-Filename-With-Dashes]/missing-[leafCategorySlug]/missing_products.json
  *
  *   Example:
- *     fileKey          = "product-microcontrollers-03112025_part4.csv"
+ *     fileKey          = "test-uploads/Accuris Full Data Report.csv"
  *     leafCategorySlug = "microcontrollers"
  *
  *     → folder:
- *         ./missing-products/missing-microcontrollers/
+ *         ./missing-products/Accuris-Full-Data-Report/missing-microcontrollers/
  *       file:
- *         missing_products_product-microcontrollers-03112025_part4.json
+ *         missing_products.json
  *
  * @param {string} fileKey
  *   CSV identifier (often the filename).
@@ -109,18 +109,28 @@ const recordMissingProduct = (
   leafCategorySlug = "unknown"
 ) => {
   try {
-    // 1) Drop the ".csv" extension so we can reuse the base filename.
-    const cleanFileKey = fileKey.replace(/\.csv$/i, "").replace(/\//g, "_");
+    // 1) Extract just the filename, drop path and ".csv" extension
+    //    e.g., "test-uploads/Accuris Full Data Report.csv" → "Accuris Full Data Report"
+    const baseFilename = path.basename(fileKey, ".csv");
+    
+    // 2) Convert filename to dash-separated format
+    //    e.g., "Accuris Full Data Report" → "Accuris-Full-Data-Report"
+    const csvFolderName = baseFilename
+      .replace(/[^a-zA-Z0-9\s-]/g, "") // Remove special chars except spaces and dashes
+      .replace(/\s+/g, "-")            // Replace spaces with dashes
+      .replace(/-+/g, "-")             // Collapse multiple dashes
+      .trim();
 
-    // 2) Make sure slug is safe to use in a folder name.
+    // 3) Make sure slug is safe to use in a folder name.
     //    (If resolver gave us "", fall back to "unknown".)
     const safeSlug = leafCategorySlug || "unknown";
 
-    // 3) Build:
-    //      ./missing-products/missing-[safeSlug]/
+    // 4) Build:
+    //      ./missing-products/[CSV-Filename-With-Dashes]/missing-[safeSlug]/
     const missingDir = path.join(
       __dirname,
       "../../missing-products",
+      csvFolderName,
       `missing-${safeSlug}`
     );
 
@@ -128,14 +138,14 @@ const recordMissingProduct = (
       fs.mkdirSync(missingDir, { recursive: true });
     }
 
-    // 4) JSON file inside that folder:
-    //      missing_products_[cleanFileKey].json
+    // 5) JSON file inside that folder (simplified name since folder has context):
+    //      missing_products.json
     const missingFilePath = path.join(
       missingDir,
-      `missing_products_${cleanFileKey}.json`
+      `missing_products.json`
     );
 
-    // 5) Load existing array if the file is already there.
+    // 6) Load existing array if the file is already there.
     let missingProducts = [];
     if (fs.existsSync(missingFilePath)) {
       try {
@@ -149,17 +159,17 @@ const recordMissingProduct = (
       }
     }
 
-    // 6) Append the current row.
+    // 7) Append the current row.
     missingProducts.push(item);
 
-    // 7) Write it back to disk (pretty-printed for debugging).
+    // 8) Write it back to disk (pretty-printed for debugging).
     fs.writeFileSync(
       missingFilePath,
       JSON.stringify(missingProducts, null, 2)
     );
 
     logInfoToFile(
-      `Recorded missing product for part_number=${item.part_number} in file ${missingFilePath}`
+      `Recorded missing product for part_number=${item.part_number} in ${csvFolderName}/missing-${safeSlug}/`
     );
   } catch (err) {
     logErrorToFile(`Error writing missing products file: ${err.message}`);

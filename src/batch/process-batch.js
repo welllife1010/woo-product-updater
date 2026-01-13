@@ -44,10 +44,10 @@
 // =============================================================================
 
 // Redis client for progress tracking
-const { appRedis } = require("../../queue");
+const { appRedis, progressKeys } = require("../services/queue");
 
 // Logging utilities
-const { logInfoToFile, logErrorToFile } = require("../../logger");
+const { logInfoToFile, logErrorToFile } = require("../utils/logger");
 
 // Product lookup and validation
 const { fetchProductData, validateProductMatch } = require("./fetch-validate");
@@ -66,11 +66,14 @@ const {
 const { recordBatchStatus } = require("./io-status");
 
 // Category resolution (fuzzy matching)
-const { resolveCategory } = require("../../category-map");
+const { resolveCategory } = require("../resolvers/category-map");
 
 // Category hierarchy creation in WooCommerce
-const { ensureCategoryHierarchy } = require("../../category-woo");
+const { ensureCategoryHierarchy } = require("../resolvers/category-woo");
 const { log } = require("util");
+
+// Runtime update mode (can be changed without restart)
+const { getUpdateMode } = require("../config/update-mode");
 
 // =============================================================================
 // CONFIGURATION
@@ -198,8 +201,10 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
    * UPDATE_MODE determines what data we update:
    *   - "quantity": Only update stock quantity (faster, less API load)
    *   - "full": Update all fields (name, description, categories, etc.)
+   * 
+   * Uses runtime config file (can be changed without restart) with env fallback.
    */
-  const updateMode = process.env.UPDATE_MODE || "full";
+  const updateMode = getUpdateMode();
 
   logInfoToFile(
     `processBatch() - Starting | ` +
@@ -255,6 +260,11 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   // MAIN PROCESSING LOOP
   // =========================================================================
   
+  // =========================================================================
+  // Track batch processing start - increment processing counter for batch size
+  // =========================================================================
+  await appRedis.incrBy(progressKeys.processingProducts(fileKey), batch.length);
+
   for (let i = 0; i < batch.length; i++) {
     const item = batch[i];
     const currentIndex = startIndex + i; // Absolute row index in the CSV
@@ -266,6 +276,11 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
       logInfoToFile(
         `processBatch() - Reached end of file at index ${currentIndex}. Stopping.`
       );
+      // Decrement processing counter for remaining unprocessed rows
+      const remainingRows = batch.length - i;
+      if (remainingRows > 0) {
+        await appRedis.decrBy(progressKeys.processingProducts(fileKey), remainingRows);
+      }
       break;
     }
 
@@ -530,12 +545,19 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
   /**
    * Increment global counters in Redis for progress tracking.
    * These are used by the UI and checkpointing system.
+   * 
+   * Also decrement processing counter for skipped and failed rows.
+   * (Updated rows are decremented in executeBatchUpdate after API success)
    */
   if (skipCount > 0) {
-    await appRedis.incrBy(`skipped-products:${fileKey}`, skipCount);
+    await appRedis.incrBy(progressKeys.skippedProducts(fileKey), skipCount);
+    // Decrement processing counter for skipped rows
+    await appRedis.decrBy(progressKeys.processingProducts(fileKey), skipCount);
   }
   if (localFailCount > 0) {
-    await appRedis.incrBy(`failed-products:${fileKey}`, localFailCount);
+    await appRedis.incrBy(progressKeys.failedProducts(fileKey), localFailCount);
+    // Decrement processing counter for failed rows
+    await appRedis.decrBy(progressKeys.processingProducts(fileKey), localFailCount);
   }
 
   // =========================================================================
@@ -553,6 +575,7 @@ async function processBatch(batch, startIndex, totalProductsInFile, fileKey) {
 
   logInfoToFile(
     `processBatch() - ✅ Completed | ` +
+    `Mode: ${updateMode} | ` +
     `Rows: ${startIndex}-${startIndex + batch.length - 1} | ` +
     `Updates queued: ${toUpdate.length} | ` +
     `Skipped: ${skipCount} | ` +

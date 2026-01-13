@@ -39,7 +39,7 @@ TEST IDEAS:
 ================================================================================
 */
 
-const { logErrorToFile, logInfoToFile } = require("../../logger");
+const { logErrorToFile, logInfoToFile } = require("../utils/logger");
 
 /**
  * BUG FIX: Initialize with fallback IMMEDIATELY to prevent race condition.
@@ -153,16 +153,85 @@ function isCurrentMetaMissing(newMetaValue, currentMeta) {
 }
 
 /**
+ * Domain mappings for environment-aware URL comparison.
+ * 
+ * All these domains are considered equivalent for comparison purposes:
+ * - https://suntsu.com (production)
+ * - https://www.suntsu.com (production with www)
+ * - https://env-suntsucom-staging.kinsta.cloud (staging)
+ * - https://env-suntsucom-development.kinsta.cloud (development)
+ * 
+ * When comparing URLs, all will be normalized to 'suntsu.com' so that
+ * staging/development URLs are treated as identical to production URLs.
+ */
+const STAGING_DEVELOPMENT_DOMAINS = [
+  'env-suntsucom-staging.kinsta.cloud',
+  'env-suntsucom-development.kinsta.cloud',
+  'www.suntsu.com',  // Also normalize www to non-www
+];
+
+const CANONICAL_DOMAIN = 'suntsu.com';
+
+/**
+ * Normalizes URLs by replacing environment-specific domains with a canonical form.
+ * 
+ * This prevents false-positive updates when the only difference between
+ * old and new values is the domain (e.g., staging vs production URLs).
+ * 
+ * Examples:
+ *   "https://env-suntsucom-staging.kinsta.cloud/image.jpg" -> "https://suntsu.com/image.jpg"
+ *   "https://env-suntsucom-development.kinsta.cloud/wp-content/uploads/x.pdf" -> "https://suntsu.com/wp-content/uploads/x.pdf"
+ *   "https://www.suntsu.com/product" -> "https://suntsu.com/product"
+ * 
+ * @param {string} value - The string value that might contain a URL
+ * @returns {string} The value with domains normalized to production form
+ */
+function normalizeUrlDomains(value) {
+  if (!value || typeof value !== 'string') return value;
+  
+  let normalized = value;
+  
+  // Replace all staging/development/www domains with canonical production domain
+  STAGING_DEVELOPMENT_DOMAINS.forEach(domain => {
+    normalized = normalized.replace(
+      new RegExp(escapeRegExp(domain), 'gi'),
+      CANONICAL_DOMAIN
+    );
+  });
+  
+  return normalized;
+}
+
+/**
+ * Escapes special regex characters in a string.
+ * @param {string} string - The string to escape
+ * @returns {string} The escaped string safe for use in RegExp
+ */
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
 * @function isMetaValueDifferent
 * @description Normalized inequality check between existing and incoming values.
-* Prevents updates when only formatting differs.
+* Prevents updates when only formatting differs or when URLs only differ by
+* environment domain (staging vs production).
 */
 function isMetaValueDifferent(newMetaValue, currentMetaValue) {
-  return normalizeText(currentMetaValue) !== normalizeText(newMetaValue);
+  // First normalize text (strip HTML, collapse whitespace, etc.)
+  let normalizedNew = normalizeText(newMetaValue);
+  let normalizedCurrent = normalizeText(currentMetaValue);
+  
+  // Then normalize URL domains for environment-agnostic comparison
+  normalizedNew = normalizeUrlDomains(normalizedNew);
+  normalizedCurrent = normalizeUrlDomains(normalizedCurrent);
+  
+  return normalizedCurrent !== normalizedNew;
 }
 
 module.exports = {
   normalizeText,
+  normalizeUrlDomains,
   isMetaKeyMissing,
   isCurrentMetaMissing,
   isMetaValueDifferent,

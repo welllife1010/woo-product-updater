@@ -37,19 +37,25 @@ ENV="${1:-staging}"
 
 if [ "$ENV" == "production" ]; then
     # ⚠️  PRODUCTION - BE CAREFUL!
-    EC2_HOST="18.144.155.64"  # TODO: Replace with actual IP
+    EC2_HOST="50.18.169.235"
     EC2_USER="ubuntu"
     APP_DIR="/home/ubuntu/woo-product-update"
     PM2_ENV="production"
 elif [ "$ENV" == "staging" ]; then
-    # ✅ STAGING - Safe for testing
-    EC2_HOST="18.144.155.64"  # TODO: Replace with actual IP
+    # ✅ STAGING - Safe for testing (separate EC2 instance)
+    EC2_HOST="3.101.70.202"
     EC2_USER="ubuntu"
     APP_DIR="/home/ubuntu/woo-product-update"
     PM2_ENV="staging"
+elif [ "$ENV" == "development" ]; then
+    # ✅ DEVELOPMENT - Also uses staging server but --env development
+    EC2_HOST="3.101.70.202"
+    EC2_USER="ubuntu"
+    APP_DIR="/home/ubuntu/woo-product-update"
+    PM2_ENV="development"
 else
     echo "❌ Unknown environment: $ENV"
-    echo "Usage: ./scripts/deploy.sh [staging|production]"
+    echo "Usage: ./scripts/deploy.sh [staging|production|development]"
     exit 1
 fi
 
@@ -90,18 +96,46 @@ echo "📤 Step 2: Syncing files to EC2..."
 rsync -avz \
     --exclude 'node_modules' \
     --exclude '.git' \
-    --exclude '.env' \
     --exclude 'logs' \
     --exclude 'output-files' \
     --exclude 'batch_status' \
-    --exclude 'missing-products' \
+    --exclude '/missing-products' \
     --exclude 'tmp-uploads' \
     --exclude 'process_checkpoint.json' \
+    --exclude 'csv-mappings.json' \
     --exclude '*.log' \
     -e "ssh -i $SSH_KEY" \
     ./ "$EC2_USER@$EC2_HOST:$APP_DIR/"
 
 echo "   ✅ Files synced successfully"
+
+# Quick verification: ensure the UI API routes we rely on actually landed.
+echo ""
+echo "🔎 Step 2b: Verifying critical files on server..."
+
+LOCAL_API_SHA=$(shasum -a 256 "$PROJECT_DIR/ui/routes/api.js" | awk '{print $1}')
+REMOTE_API_SHA=$(ssh -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "shasum -a 256 $APP_DIR/ui/routes/api.js 2>/dev/null | awk '{print \$1}'")
+
+echo "   Local ui/routes/api.js:  $LOCAL_API_SHA"
+echo "   Remote ui/routes/api.js: $REMOTE_API_SHA"
+
+if [ -z "$REMOTE_API_SHA" ]; then
+    echo "   ⚠️  Could not read remote ui/routes/api.js checksum"
+else
+    if [ "$LOCAL_API_SHA" != "$REMOTE_API_SHA" ]; then
+        echo "   ❌ Checksum mismatch: ui/routes/api.js did not sync correctly"
+        echo "   (Aborting before restart so we don't run stale code)"
+        exit 1
+    fi
+fi
+
+HAS_PROGRESS_DELETE=$(ssh -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "grep -n 'router.delete(\"/progress/:fileKey\"' $APP_DIR/ui/routes/api.js >/dev/null 2>&1 && echo yes || echo no")
+if [ "$HAS_PROGRESS_DELETE" != "yes" ]; then
+    echo "   ❌ Missing DELETE /progress/:fileKey route on server (stale api.js?)"
+    exit 1
+fi
+
+echo "   ✅ Verified ui/routes/api.js synced and includes DELETE /progress/:fileKey"
 
 # =============================================================================
 # STEP 3: Install dependencies and restart PM2
@@ -166,4 +200,3 @@ echo "   2. View logs: pm2 logs"
 echo "   3. Monitor: pm2 monit"
 echo "   4. Access UI: http://$EC2_HOST:4000"
 echo "=============================================="
-

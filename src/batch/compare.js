@@ -6,6 +6,21 @@ FILE: src/batch/compare.js
 PURPOSE:
 Decide whether an update is needed by comparing current vs new data.
 
+NOTE (2026): This file is now SECONDARY to build-update-payload.js
+The primary update logic now uses buildUpdatePayload() which:
+1. Returns ONLY fields that need updating (diff-based)
+2. Has centralized protection rules for all fields
+3. Is used by handlers.js for actual updates
+
+This file (isUpdateNeeded, filterCurrentData) is kept for:
+- Backwards compatibility
+- Additional logging/debugging
+- Legacy code that may still reference it
+
+For new development, use build-update-payload.js instead.
+
+================================================================================
+
 ADDED VALUE:
 - Filters current meta to only fields we track (avoids noise)
 - Encodes all special skip rules in one place
@@ -30,8 +45,9 @@ THE FIX:
 ================================================================================
 */
 
-const { logger, logInfoToFile, logErrorToFile } = require("../../logger");
+const { logger, logInfoToFile, logErrorToFile } = require("../utils/logger");
 const { normalizeText, isCurrentMetaMissing, isMetaValueDifferent } = require("./text-utils");
+const { getUpdateMode } = require("../config/update-mode");
 
 /**
  * List of meta_data keys we track for comparison.
@@ -62,6 +78,16 @@ const TRACKED_META_KEYS = [
   "moisture_sensitivity_level",
   "export_control_class_number",
   "htsus_code",
+  // Basic Product Info
+  "manufacturer_lead_weeks",
+  // Document & Media
+  "pcn_design_specification",
+  "pcn_assembly_origin",
+  "pcn_packaging",
+  "html_datasheet",
+  "eda_models",
+  // Environmental Info (general)
+  "environmental_information",
 ];
 
 /**
@@ -144,7 +170,7 @@ const isUpdateNeeded = (currentData, newData, _currentIndex, _total, partNumber,
     return false;
   }
 
-  const updateMode = process.env.UPDATE_MODE || "full";
+  const updateMode = getUpdateMode();
   const fieldsToUpdate = [];
   logInfoToFile(`[ isUpdateNeeded() ] - Checking for updates for Part Number: ${partNumber} in ${fileName}`);
 
@@ -201,11 +227,42 @@ const isUpdateNeeded = (currentData, newData, _currentIndex, _total, partNumber,
           }
         }
 
-        // 2) Image URL: skip digikey hosts to avoid hotlinking
-        if (newMeta.key === "image_url" &&
-            (String(newMetaValue).includes("digikey.com") || String(newMetaValue).includes("mm.digikey.com"))) {
-          logInfoToFile(`[ isUpdateNeeded() ] - Skipping image_url (digikey host)`);
-          return;
+        // 2) Image URL: protect existing valid images
+        if (newMeta.key === "image_url") {
+          // Skip digikey hosts to avoid hotlinking
+          if (String(newMetaValue).includes("digikey.com") || String(newMetaValue).includes("mm.digikey.com")) {
+            logInfoToFile(`[ isUpdateNeeded() ] - Skipping image_url (digikey host)`);
+            return;
+          }
+          // Don't overwrite existing valid image with empty/invalid value
+          if (currentMetaValue && (!newMetaValue || newMetaValue.trim() === "")) {
+            logInfoToFile(`[ isUpdateNeeded() ] - Skipping image_url (would overwrite existing image with empty value)`);
+            return;
+          }
+          // Don't overwrite existing internal images (Suntsu WordPress/S3/Staging) with external URLs
+          const currentLower = String(currentMetaValue).toLowerCase();
+          const isCurrentInternalImage = currentLower.includes("suntsu.com") || 
+                                         currentLower.includes("suntsu-products-s3-bucket") ||
+                                         currentLower.includes("kinsta.cloud");  // staging domain
+          if (currentMetaValue && isCurrentInternalImage && currentMetaValue !== newMetaValue) {
+            const newLower = String(newMetaValue).toLowerCase();
+            const isNewInternalImage = newLower.includes("suntsu.com") || 
+                                       newLower.includes("suntsu-products-s3-bucket") ||
+                                       newLower.includes("kinsta.cloud");  // staging domain
+            // Only allow update if new value is also an internal image AND on the same domain
+            // This prevents production URLs from overwriting staging URLs and vice versa
+            if (!isNewInternalImage) {
+              logInfoToFile(`[ isUpdateNeeded() ] - Skipping image_url (current internal image, new is external: "${newMetaValue}")`);
+              return;
+            }
+            // Prevent cross-environment overwrites (staging <-> production)
+            const currentIsStaging = currentLower.includes("kinsta.cloud");
+            const newIsStaging = newLower.includes("kinsta.cloud");
+            if (currentIsStaging !== newIsStaging) {
+              logInfoToFile(`[ isUpdateNeeded() ] - Skipping image_url (cross-environment: current="${currentMetaValue}", new="${newMetaValue}")`);
+              return;
+            }
+          }
         }
 
         // ----------------------------------------------------------------------

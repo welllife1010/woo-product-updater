@@ -1,88 +1,168 @@
 #!/bin/bash
 # =============================================================================
-# reset-and-restart.sh - Complete reset for WooCommerce Product Updater
+# DEPLOYMENT SCRIPT FOR WOO-PRODUCT-UPDATER
 # =============================================================================
-# Usage:
-#   ./scripts/reset-and-restart.sh              # Normal reset (keeps csv-mappings.json)
-#   ./scripts/reset-and-restart.sh --full       # Full reset (clears everything)
-#   ./scripts/reset-and-restart.sh <fileKey>    # Reset specific file only
+#
+# This script handles deployment to EC2 instances.
+#
+# USAGE:
+#   ./scripts/deploy.sh [staging|production]
+#
+# PREREQUISITES:
+#   - SSH access to EC2 instance
+#   - .env file configured on the server
+#   - Redis running on the server
+#
 # =============================================================================
 
-set -e
-cd /home/ubuntu/woo-product-update
+set -e  # Exit on any error
 
-echo "🛑 Stopping all PM2 processes..."
-pm2 stop all
+# =============================================================================
+# CONFIGURATION - MODIFY THESE FOR YOUR ENVIRONMENT
+# =============================================================================
 
-if [ "$1" == "--full" ]; then
-    echo "🗑️  FULL RESET - Clearing everything including csv-mappings.json..."
-    redis-cli FLUSHALL
-    rm -f process_checkpoint.json
-    rm -rf batch_status/*
-    rm -rf missing-products/missing-*/*.json
-    rm -f csv-mappings.json
-    echo '{"files":[]}' > csv-mappings.json
-    > output-files/info-log.txt
-    > output-files/error-log.txt
-elif [ -n "$1" ]; then
-    echo "🔄 Resetting specific file: $1"
-    CLEAN_KEY=$(echo "$1" | sed 's/\.csv$//' | tr '/' '_')
-    
-    # Clear Redis keys for this file
-    redis-cli -n 0 EVAL "for _,k in ipairs(redis.call('keys','bull:*')) do redis.call('del',k) end" 0
-    redis-cli -n 1 KEYS "*${CLEAN_KEY}*" | xargs -r redis-cli -n 1 DEL
-    redis-cli -n 1 KEYS "*$1*" | xargs -r redis-cli -n 1 DEL
-    
-    # Clear checkpoint for this file
-    if [ -f process_checkpoint.json ]; then
-        node -e "
-        const fs = require('fs');
-        const cp = JSON.parse(fs.readFileSync('process_checkpoint.json', 'utf8'));
-        delete cp['$1'];
-        fs.writeFileSync('process_checkpoint.json', JSON.stringify(cp, null, 2));
-        " 2>/dev/null || true
-    fi
-    
-    # Clear batch_status for this file
-    rm -rf "batch_status/${1%/*}" 2>/dev/null || true
-    
-    # Clear missing products for this file
-    find missing-products/ -name "*${CLEAN_KEY}*" -delete 2>/dev/null || true
-    
-    # Set status to ready in csv-mappings.json
-    node -e "
-    const fs = require('fs');
-    const mappings = JSON.parse(fs.readFileSync('csv-mappings.json', 'utf8'));
-    const idx = mappings.files.findIndex(f => f.fileKey === '$1');
-    if (idx !== -1) {
-        mappings.files[idx].status = 'ready';
-        fs.writeFileSync('csv-mappings.json', JSON.stringify(mappings, null, 2));
-        console.log('✅ Set $1 status to ready');
-    }
-    " 2>/dev/null || true
+# Default environment
+ENV="${1:-staging}"
+
+# =============================================================================
+# EC2 CONFIGURATION - UPDATE THESE WITH YOUR ACTUAL VALUES!
+# =============================================================================
+# 
+# Based on your ecosystem.config.js, your EC2 uses:
+#   - User: ubuntu
+#   - App Directory: /home/ubuntu/woo-product-update
+#
+# You need to fill in your EC2 hostname/IP below:
+# =============================================================================
+
+if [ "$ENV" == "production" ]; then
+    # ⚠️  PRODUCTION - BE CAREFUL!
+    EC2_HOST="18.144.155.64"  # TODO: Replace with actual IP
+    EC2_USER="ubuntu"
+    APP_DIR="/home/ubuntu/woo-product-update"
+    PM2_ENV="production"
+elif [ "$ENV" == "staging" ]; then
+    # ✅ STAGING - Safe for testing
+    EC2_HOST="18.144.155.64"  # TODO: Replace with actual IP
+    EC2_USER="ubuntu"
+    APP_DIR="/home/ubuntu/woo-product-update"
+    PM2_ENV="staging"
 else
-    echo "🧹 Normal reset - Clearing state but keeping csv-mappings.json..."
-    redis-cli FLUSHALL
-    rm -f process_checkpoint.json
-    rm -rf batch_status/*
-    rm -rf missing-products/missing-*/*.json
+    echo "❌ Unknown environment: $ENV"
+    echo "Usage: ./scripts/deploy.sh [staging|production]"
+    exit 1
 fi
 
-echo "🔄 Flushing PM2 logs..."
-pm2 flush
+# SSH Key (modify if your key is in a different location)
+SSH_KEY="~/.ssh/woo-product-update.pem"
 
-echo "🚀 Starting all services..."
-pm2 start woo-update-app woo-worker csv-mapping-ui
+echo "=============================================="
+echo "🚀 Deploying to $ENV environment"
+echo "   Host: $EC2_HOST"
+echo "   User: $EC2_USER"
+echo "   Directory: $APP_DIR"
+echo "=============================================="
 
-echo "⏳ Waiting for startup..."
-sleep 5
+# =============================================================================
+# STEP 1: Local Preparation
+# =============================================================================
 
 echo ""
-echo "✅ Reset complete!"
-pm2 status
+echo "📦 Step 1: Preparing local files..."
+
+# Ensure we're in the project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_DIR"
+
+echo "   Working directory: $(pwd)"
+
+# =============================================================================
+# STEP 2: Sync files to EC2
+# =============================================================================
+
 echo ""
-echo "📊 Next steps:"
-echo "   - View logs: pm2 logs"
-echo "   - Check info: tail -f output-files/info-log.txt"
-echo "   - UI: http://18.144.155.64:4000"
-echo "   - Bull Dashboard: http://18.144.155.64:3000/admin/queues"
+echo "📤 Step 2: Syncing files to EC2..."
+
+# Rsync options:
+#   -avz: archive, verbose, compress
+#   --exclude: skip files that shouldn't be deployed
+rsync -avz \
+    --exclude 'node_modules' \
+    --exclude '.git' \
+    --exclude '.env' \
+    --exclude 'logs' \
+    --exclude 'output-files' \
+    --exclude 'batch_status' \
+    --exclude 'missing-products' \
+    --exclude 'tmp-uploads' \
+    --exclude 'process_checkpoint.json' \
+    --exclude '*.log' \
+    -e "ssh -i $SSH_KEY" \
+    ./ "$EC2_USER@$EC2_HOST:$APP_DIR/"
+
+echo "   ✅ Files synced successfully"
+
+# =============================================================================
+# STEP 3: Install dependencies and restart PM2
+# =============================================================================
+
+echo ""
+echo "🔧 Step 3: Installing dependencies and restarting PM2..."
+
+ssh -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" << EOF
+    cd $APP_DIR
+    
+    echo "   Installing npm dependencies..."
+    npm install --production
+    
+    echo "   Creating required directories..."
+    mkdir -p logs output-files batch_status missing-products tmp-uploads
+    
+    echo "   Checking Redis connection..."
+    redis-cli ping || echo "⚠️  Redis may not be running!"
+    
+    echo "   Restarting PM2 processes..."
+    pm2 stop ecosystem.config.js 2>/dev/null || true
+    pm2 delete ecosystem.config.js 2>/dev/null || true
+    pm2 start ecosystem.config.js --env $PM2_ENV
+    
+    echo "   Saving PM2 configuration..."
+    pm2 save
+    
+    echo "   PM2 process status:"
+    pm2 status
+EOF
+
+# =============================================================================
+# STEP 4: Verify deployment
+# =============================================================================
+
+echo ""
+echo "✅ Step 4: Verifying deployment..."
+
+ssh -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" << EOF
+    echo "   Checking PM2 status..."
+    pm2 status
+    
+    echo ""
+    echo "   Checking if services are responding..."
+    sleep 3
+    
+    # Check main process port
+    curl -s http://localhost:3000 > /dev/null && echo "   ✅ Main server (3000) is responding" || echo "   ⚠️  Main server (3000) not responding"
+    
+    # Check UI port
+    curl -s http://localhost:4000 > /dev/null && echo "   ✅ UI server (4000) is responding" || echo "   ⚠️  UI server (4000) not responding"
+EOF
+
+echo ""
+echo "=============================================="
+echo "🎉 Deployment to $ENV complete!"
+echo ""
+echo "📝 Next steps:"
+echo "   1. SSH to server: ssh -i $SSH_KEY $EC2_USER@$EC2_HOST"
+echo "   2. View logs: pm2 logs"
+echo "   3. Monitor: pm2 monit"
+echo "   4. Access UI: http://$EC2_HOST:4000"
+echo "=============================================="

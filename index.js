@@ -14,8 +14,8 @@ dotenv.config();
 const express = require("express");
 const { performance } = require("perf_hooks");
 
-const { appRedis, batchQueue } = require("./queue");
-const { processReadyCsvFilesFromMappings } = require("./s3-helpers");
+const { appRedis, batchQueue } = require("./src/services/queue");
+const { processReadyCsvFilesFromMappings } = require("./src/services/s3-helpers");
 const {
   logger,
   logErrorToFile,
@@ -23,9 +23,14 @@ const {
   logInfoToFile,
   logProgressToFile,
   ENV_LABEL,
-} = require("./logger");
-const { createUniqueJobId } = require("./utils");
-const { addBatchJob } = require("./job-manager");
+} = require("./src/utils/logger");
+const {
+  resolveAppEnv,
+  getS3BucketName,
+  requireNonEmpty,
+} = require("./src/config/runtime-env");
+const { createUniqueJobId } = require("./src/utils/utils");
+const { addBatchJob } = require("./src/services/job-manager");
 
 const { BullMQAdapter } = require("@bull-board/api/bullMQAdapter");
 const { createBullBoard } = require("@bull-board/api");
@@ -42,17 +47,8 @@ app.use(express.json());
 // ENVIRONMENT CONFIGURATION
 // =============================================================================
 
-const executionMode = process.env.EXECUTION_MODE || "production";
-logInfoToFile(`🚀 Starting application in ${executionMode} mode`);
-
-/**
- * Get S3 bucket name based on execution mode
- */
-const getS3BucketName = (mode) => {
-  return mode === "development" || mode === "test"
-    ? process.env.S3_BUCKET_NAME_TEST
-    : process.env.S3_BUCKET_NAME;
-};
+const appEnv = resolveAppEnv(process.env);
+logInfoToFile(`🚀 Starting application in ${appEnv} environment`);
 
 // =============================================================================
 // BASIC AUTH MIDDLEWARE FOR PRODUCTION
@@ -64,7 +60,7 @@ const getS3BucketName = (mode) => {
  */
 const basicAuthMiddleware = (req, res, next) => {
   // Skip auth for non-production environments
-  if (executionMode !== "production") {
+  if (appEnv !== "production") {
     return next();
   }
   
@@ -112,7 +108,7 @@ createBullBoard({
   serverAdapter: serverAdapter,
 });
 
-if (executionMode === "production") {
+if (appEnv === "production") {
   logInfoToFile("✅ Bull Board initialized with basic auth protection");
 } else {
   logInfoToFile("✅ Bull Board initialized (open access for dev/staging)");
@@ -128,9 +124,9 @@ if (executionMode === "production") {
  */
 app.get("/api/environment", (req, res) => {
   res.json({
-    mode: executionMode,
+    mode: appEnv,
     label: ENV_LABEL,
-    bucket: getS3BucketName(executionMode),
+    bucket: getS3BucketName(process.env, appEnv),
     timestamp: new Date().toISOString(),
   });
 });
@@ -159,12 +155,13 @@ const handleProcessError = (error, type = "Error") => {
  */
 const mainProcess = async () => {
   try {
-    const s3BucketName = getS3BucketName(executionMode);
+    const s3BucketName = getS3BucketName(process.env, appEnv);
 
-    if (!s3BucketName) {
-      logErrorToFile("Environment variable S3_BUCKET_NAME (or S3_BUCKET_NAME_TEST) is not set.");
-      return;
-    }
+    // Fail fast with clear messaging (Option A + legacy fallback supported).
+    requireNonEmpty(
+      s3BucketName,
+      "S3_BUCKET_NAME_PRODUCTION|S3_BUCKET_NAME_STAGING|S3_BUCKET_NAME_DEVELOPMENT (or legacy S3_BUCKET_NAME/S3_BUCKET_NAME_TEST)"
+    );
 
     logInfoToFile(`📦 Using S3 bucket: ${s3BucketName}`);
 

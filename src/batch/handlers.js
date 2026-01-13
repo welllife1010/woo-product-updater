@@ -3,50 +3,65 @@
 FILE: src/batch/handlers.js
 PURPOSE: Mode-specific update handlers + the bulk API executor.
 WHY HERE?
-- Separates decision-making (compare.js) from mutation mechanics.
+- Separates decision-making from mutation mechanics.
+- Uses centralized buildUpdatePayload for diff-based updates.
 ================================================================================
 */
 
-const { appRedis } = require("../../queue");
-const { wooApi } = require("../../woo-helpers");
-const { scheduleApiRequest } = require("../../job-manager");
-const { logErrorToFile, logInfoToFile } = require("../../logger");
-const { createUniqueJobId } = require("../../utils");
-const { isUpdateNeeded } = require("./compare");
+const { appRedis, progressKeys } = require("../services/queue");
+const { wooApi } = require("../services/woo-helpers");
+const { scheduleApiRequest } = require("../services/job-manager");
+const { logErrorToFile, logInfoToFile } = require("../utils/logger");
+const { createUniqueJobId } = require("../utils/utils");
+const { buildUpdatePayload, buildQuantityOnlyPayload } = require("./build-update-payload");
 
 /**
 * @function handleQuantityUpdate
 * @description Pushes a minimal update when quantity value actually changes.
+* Uses centralized buildQuantityOnlyPayload for consistency.
 * @returns {boolean} true if we queued an update; false if skipped.
 */
 function handleQuantityUpdate(newData, currentData, toUpdate, productId, item) {
-  const currentQuantity = currentData.meta_data.find((m) => m.key === "quantity")?.value || "0";
-  const newQuantity = newData.meta_data.find((m) => m.key === "quantity")?.value || "0";
+  logInfoToFile(`[QUANTITY UPDATE] Processing ${item.part_number} (ID: ${productId})`);
+  
+  const { payload, changed } = buildQuantityOnlyPayload(
+    currentData, 
+    newData, 
+    productId, 
+    item.part_number
+  );
 
-  if (currentQuantity === newQuantity) {
-    logInfoToFile(`🔎 Skipping ${item.part_number}, quantity unchanged: ${currentQuantity}`);
+  if (!changed || !payload) {
+    logInfoToFile(`[QUANTITY UPDATE] ⏭️ Skipping ${item.part_number}, quantity unchanged`);
     return false;
   }
 
-  toUpdate.push({
-    id: productId,
-    manufacturer: item.manufacturer,
-    meta_data: [{ key: "quantity", value: String(newQuantity) }],
-  });
-
+  // Add manufacturer for reference
+  payload.manufacturer = item.manufacturer;
+  toUpdate.push(payload);
+  logInfoToFile(`[QUANTITY UPDATE] ✅ Queued ${item.part_number} for quantity update`);
   return true;
 }
 
 /**
 * @function handleFullUpdate
-* @description Queues a full update (entire newData) only if comparison says so.
+* @description Queues a diff-based update (only changed fields).
+* Uses centralized buildUpdatePayload for all field-level decisions.
 */
 function handleFullUpdate(newData, currentData, toUpdate, productId, item, fileKey) {
-  if (!isUpdateNeeded(currentData, newData, undefined, undefined, item.part_number, fileKey)) {
+  const { payload, changedFields, skippedFields } = buildUpdatePayload(
+    currentData,
+    newData,
+    item.part_number,
+    fileKey
+  );
+
+  if (!payload || changedFields.length === 0) {
     logInfoToFile(`Skipping ${item.part_number} (no changes detected).`);
     return false;
   }
-  toUpdate.push(newData);
+
+  toUpdate.push(payload);
   return true;
 }
 
@@ -68,6 +83,13 @@ async function executeBatchUpdate(toUpdate, fileKey, MAX_RETRIES) {
     return;
   }
 
+  // Log the payload being sent for debugging
+  logInfoToFile(`[BATCH UPDATE] Sending ${toUpdate.length} products to WooCommerce`);
+  for (const item of toUpdate) {
+    const metaKeys = (item.meta_data || []).map(m => `${m.key}=${m.value}`).join(', ');
+    logInfoToFile(`[BATCH UPDATE] Product ID ${item.id}: meta_data=[${metaKeys}]`);
+  }
+
   let attempts = 0;
   while (attempts < MAX_RETRIES) {
     try {
@@ -78,7 +100,13 @@ async function executeBatchUpdate(toUpdate, fileKey, MAX_RETRIES) {
       );
 
       const updatedCount = response.data?.update?.length || 0;
-      await appRedis.incrBy(`updated-products:${fileKey}`, updatedCount);
+      logInfoToFile(`[BATCH UPDATE] WooCommerce response: ${updatedCount} products updated`);
+      
+      await appRedis.incrBy(progressKeys.updatedProducts(fileKey), updatedCount);
+      // Decrement processing counter for successfully updated products
+      if (updatedCount > 0) {
+        await appRedis.decrBy(progressKeys.processingProducts(fileKey), updatedCount);
+      }
       return; // success
     } catch (err) {
       attempts++;

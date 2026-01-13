@@ -65,19 +65,25 @@ const fs = require("fs");
 const { Worker } = require("bullmq");
 
 // Custom logging utilities
-const { logErrorToFile, logInfoToFile } = require("./logger");
+const { logErrorToFile, logInfoToFile } = require("./src/utils/logger");
 
-// Redis client for cleanup on shutdown
-const { appRedis } = require("./queue");
+// Redis client for cleanup on shutdown + BullMQ connection details
+const {
+  appRedis,
+  progressKeys,
+  QUEUE_NAME,
+  BULLMQ_PREFIX,
+  bullmqConnection,
+} = require("./src/services/queue");
 
 // Main batch processing function
 const { processBatch } = require("./src/batch/process-batch");
 
 // Checkpoint management (with atomic save for race condition fix)
-const { 
+const {
   getLastProcessedRow,        // Sync version (for backward compatibility)
   saveCheckpointAtomic,       // Atomic save to prevent race conditions
-} = require("./checkpoint");
+} = require("./src/batch/checkpoint");
 
 // =============================================================================
 // CONFIGURATION
@@ -250,16 +256,16 @@ function triggerMainAppRestart() {
  */
 async function getFileCompletionStatus(fileKey) {
   try {
-    const totalRows = parseInt((await appRedis.get(`total-rows:${fileKey}`)) || "0", 10);
+    const totalRows = parseInt((await appRedis.get(progressKeys.totalRows(fileKey))) || "0", 10);
     
     // If no total rows tracked, file isn't being processed
     if (totalRows === 0) {
       return { complete: false, stats: { totalRows: 0, processed: 0 } };
     }
     
-    const updated = parseInt((await appRedis.get(`updated-products:${fileKey}`)) || "0", 10);
-    const skipped = parseInt((await appRedis.get(`skipped-products:${fileKey}`)) || "0", 10);
-    const failed = parseInt((await appRedis.get(`failed-products:${fileKey}`)) || "0", 10);
+    const updated = parseInt((await appRedis.get(progressKeys.updatedProducts(fileKey))) || "0", 10);
+    const skipped = parseInt((await appRedis.get(progressKeys.skippedProducts(fileKey))) || "0", 10);
+    const failed = parseInt((await appRedis.get(progressKeys.failedProducts(fileKey))) || "0", 10);
     
     const processedCount = updated + skipped + failed;
     
@@ -273,6 +279,19 @@ async function getFileCompletionStatus(fileKey) {
   }
 }
 
+// =============================================================================
+// COMPLETION LOG DEDUPE (avoid repeating the same "complete" logs when idle)
+// =============================================================================
+
+// Tracks which files we've already announced as complete (and with what stats)
+// so periodic completion checks don't spam the logs.
+const announcedCompletedFileSignatures = new Map(); // fileKey -> signature string
+
+// Tracks whether we've already announced the "all tracked files completed" banner
+// for the current tracked set.
+let lastTrackedFilesSignature = null;
+let allCompleteAnnouncedForSignature = false;
+
 /**
  * Check all currently tracked files and handle completion.
  * - Marks completed files in csv-mappings.json
@@ -280,8 +299,8 @@ async function getFileCompletionStatus(fileKey) {
  */
 async function checkAndHandleCompletion() {
   try {
-    // Get all file keys being tracked in Redis
-    const fileKeys = await appRedis.keys("total-rows:*");
+    // Get all file keys being tracked in Redis (environment-specific)
+    const fileKeys = await appRedis.keys(progressKeys.totalRowsPattern());
     
     if (fileKeys.length === 0) {
       // No files being tracked - check if there are ready files to start
@@ -292,21 +311,44 @@ async function checkAndHandleCompletion() {
       return;
     }
     
+    // If the tracked set changes (new file starts / cleared / etc.), allow a new
+    // "all complete" announcement.
+    const trackedFilesSignature = fileKeys.slice().sort().join("|");
+    if (trackedFilesSignature !== lastTrackedFilesSignature) {
+      lastTrackedFilesSignature = trackedFilesSignature;
+      allCompleteAnnouncedForSignature = false;
+    }
+
     let allComplete = true;
     const completedFileKeys = [];
     
     for (const key of fileKeys) {
-      const fileKey = key.replace(/^total-rows:/, "");
+      const fileKey = progressKeys.extractFileKey(key);
       const { complete, stats } = await getFileCompletionStatus(fileKey);
       
       if (complete) {
         completedFileKeys.push(fileKey);
-        logInfoToFile(
-          `✅ File ${fileKey} complete: ${stats.updated} updated, ` +
-          `${stats.skipped} skipped, ${stats.failed} failed`
-        );
+
+        // Only log completion once per file+stats signature to avoid spam when
+        // periodic checks run but nothing has changed.
+        const signature = `${stats.totalRows}|${stats.updated}|${stats.skipped}|${stats.failed}`;
+        const lastSignature = announcedCompletedFileSignatures.get(fileKey);
+        if (lastSignature !== signature) {
+          announcedCompletedFileSignatures.set(fileKey, signature);
+          logInfoToFile(
+            `✅ File ${fileKey} complete: ${stats.updated} updated, ` +
+            `${stats.skipped} skipped, ${stats.failed} failed`
+          );
+        }
       } else {
         allComplete = false;
+
+        // If the file is no longer complete (e.g., restarted/cleared/reset),
+        // allow a future completion log again.
+        if (announcedCompletedFileSignatures.has(fileKey)) {
+          announcedCompletedFileSignatures.delete(fileKey);
+        }
+
         // Only log progress occasionally to avoid spam
         if (completionCheckCounter % 50 === 0 && stats.totalRows > 0) {
           logInfoToFile(
@@ -322,7 +364,8 @@ async function checkAndHandleCompletion() {
     }
     
     // If all tracked files are complete, check for new ready files
-    if (allComplete && completedFileKeys.length > 0) {
+    if (allComplete && completedFileKeys.length > 0 && !allCompleteAnnouncedForSignature) {
+      allCompleteAnnouncedForSignature = true;
       logInfoToFile(`🎉 All ${completedFileKeys.length} tracked file(s) completed!`);
       
       // Small delay to let things settle before checking for more work
@@ -351,7 +394,7 @@ async function checkAndHandleCompletion() {
  */
 const batchWorker = new Worker(
   // Queue name - must match the queue name used when adding jobs
-  "batchQueue",
+  QUEUE_NAME || "batchQueue",
   
   // Job processor function - called for each job
   async (job) => {
@@ -432,7 +475,7 @@ const batchWorker = new Worker(
         );
         batchStartIndex = getLastProcessedRow(fileKey);
         logInfoToFile(
-          `📌 Job ${job.id}: Retrieved lastProcessedRow=${batchStartIndex} from checkpoint`
+          `Job ${job.id}: Retrieved lastProcessedRow=${batchStartIndex} from checkpoint`
         );
       }
 
@@ -552,11 +595,11 @@ const batchWorker = new Worker(
   
   // Worker configuration options
   {
-    // Redis connection settings
-    connection: {
-      host: process.env.REDIS_HOST || "127.0.0.1",
-      port: parseInt(process.env.REDIS_PORT) || 6379,
-    },
+    // Redis connection settings (MUST match queue.js, including TLS/auth/db)
+    connection: bullmqConnection,
+
+    // Prefix MUST match queue.js when BULLMQ_PREFIX is customized
+    prefix: BULLMQ_PREFIX || "bull",
     
     // How many jobs this worker processes in parallel
     concurrency: concurrency,
@@ -631,8 +674,8 @@ batchWorker.on("error", (error) => {
  */
 const checkAllFilesProcessed = async () => {
   try {
-    // Get all file keys being tracked in Redis
-    const fileKeys = await appRedis.keys("total-rows:*");
+    // Get all file keys being tracked in Redis (environment-specific)
+    const fileKeys = await appRedis.keys(progressKeys.totalRowsPattern());
     
     // FIX: No files = KEEP WAITING, not "all done"
     // Returning true here causes shutdown → PM2 restart → infinite loop!
@@ -643,14 +686,13 @@ const checkAllFilesProcessed = async () => {
     
     for (const key of fileKeys) {
       // Extract the fileKey from the Redis key pattern
-      // Using regex with anchor (^) to only match at start
-      const fileKey = key.replace(/^total-rows:/, "");
+      const fileKey = progressKeys.extractFileKey(key);
       
       // Get tracking data for this file
-      const totalRows = parseInt((await appRedis.get(`total-rows:${fileKey}`)) || "0", 10);
-      const updated = parseInt((await appRedis.get(`updated-products:${fileKey}`)) || "0", 10);
-      const skipped = parseInt((await appRedis.get(`skipped-products:${fileKey}`)) || "0", 10);
-      const failed = parseInt((await appRedis.get(`failed-products:${fileKey}`)) || "0", 10);
+      const totalRows = parseInt((await appRedis.get(progressKeys.totalRows(fileKey))) || "0", 10);
+      const updated = parseInt((await appRedis.get(progressKeys.updatedProducts(fileKey))) || "0", 10);
+      const skipped = parseInt((await appRedis.get(progressKeys.skippedProducts(fileKey))) || "0", 10);
+      const failed = parseInt((await appRedis.get(progressKeys.failedProducts(fileKey))) || "0", 10);
 
       const processedCount = updated + skipped + failed;
 
